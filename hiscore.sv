@@ -51,8 +51,8 @@ assign downloading_dump = ioctl_download && ioctl_wr && (ioctl_index==4);
 //reg [31:0] delay_default = 24'h3FFFFF; // 0.35 seconds
 //reg [31:0] delay_default = 24'h1FFFFF; // 0.175 seconds
 reg [31:0] delay_default = 24'hFFFF;		// Default initial delay before highscore load begins (overridden by delay from module inputs if supplied)
-reg [31:0] read_defaultwait = 24'hFFFF;	// Delay between start/end check attempts
-reg [31:0] read_defaultcheck = 4'b1111;	// Duration of start/end check attempt (>1 loop to allow pause/mux based access to settle)
+reg [31:0] read_defaultwait = 6'b111111;	// Delay between start/end check attempts
+reg [31:0] read_defaultcheck = 3'b111;		// Duration of start/end check attempt (>1 loop to allow pause/mux based access to settle)
 
 assign ram_address = ram_addr[ADDRESSWIDTH-1:0];
 
@@ -148,7 +148,7 @@ begin
 		if(ioctl_wr & ~ioctl_addr[2] & ~ioctl_addr[1] &  ioctl_addr[0]) ioctl_dout_r2 <= ioctl_dout;
 		if(ioctl_wr & ~ioctl_addr[2] & ioctl_addr[1] & ~ioctl_addr[0]) ioctl_dout_r3 <= ioctl_dout;
 		// Keep track of the largest entry during config download
-		total_entries <= ioctl_addr[7:3];
+		total_entries <= ioctl_addr[4:0];
 	end
 	
 	// Track completion of configuration and dump download
