@@ -1,7 +1,7 @@
 module hiscore #(parameter ADDRESSWIDTH=10) (
 	input				clk,
 	input				reset,
-	input	[31:0]	delay,
+	input	[31:0]	delay,								// Custom initial delay before highscore load begins
 	
 	input				ioctl_upload,
 	input				ioctl_download,
@@ -11,61 +11,28 @@ module hiscore #(parameter ADDRESSWIDTH=10) (
 	input	[7:0]		ioctl_din,
 	input	[7:0]		ioctl_index,
 	
-	output	[ADDRESSWIDTH-1:0]	ram_address,
-	output	[7:0]						data_to_ram,
-	output	reg						ram_write,
-	output	reg						pause
+	output	[ADDRESSWIDTH-1:0]	ram_address,	// Address in game RAM to read/write score data
+	output	[7:0]						data_to_ram,	// Data to write to game RAM
+	output	reg						ram_write,		// Write to game RAM (active high)
+	output	reg						pause				// Pause game (active high)
 );
 
 /*
-00 00 00 0b 0f 10 01 00
-00 00 00 23 0f 04 12 00
-[ addr (4)]len start end pad
-addr -> address of ram (in memory map)
-len -> how many bytes
-start -> wait for this value at start
-end -> wait for this value at end
+Hiscore config structure
+------------------------
+00 00 43 0b  0f    10  01  00
+00 00 40 23  02    04  12  00
+[   ADDR  ] LEN START END PAD
+
+4 bytes		Address of ram entry (in core memory map)
+1 byte		Length of ram entry in bytes
+1 byte		Start value to check for at start of address range before proceeding
+1 byte		End value to check for at end of address range before proceeding
+1 byte		(padding)
+
 */
 
-
-//reg [25:0] delay_default = 21'h1FFFFF;
-//reg [25:0] delay_default = 25'h1FFFFFF; // 2.8 seconds
-//reg [25:0] delay_default = 24'hFFFFFF; // 1.4 seconds
-//reg [25:0] delay_default = 24'h7FFFFF; // 0.7 seconds
-//reg [25:0] delay_default = 24'h3FFFFF; // 0.35 seconds
-//reg [25:0] delay_default = 24'h1FFFFF; // 0.175 seconds
-reg [31:0] delay_default = 24'h7FFFF; // 0.04 seconds
-reg [31:0] read_defaultwait = 24'h7FFFF; // 0.04 seconds
-reg [31:0] read_defaultcheck = 4'b1111; 
-reg [15:0] read_attempt = 1'b0;
-
-assign ram_address = ram_addr[ADDRESSWIDTH-1:0];
-
-//reg  [7:0] ioctl_dout_r;
-reg	[7:0]		ioctl_dout_r2;
-reg	[7:0]		ioctl_dout_r3;
-reg	[3:0]		state = 4'b0000;
-reg	[3:0]		next_state = 4'b0000;
-reg	[31:0]	wait_timer;
-
-reg				ram_read = 1'b0;
-reg	[3:0]		counter = 4'b0;
-
-reg				reset_last = 1'b0;
-
-reg	[7:0]		last_index;
-reg				last_ioctl_download=0;
-reg	[24:0]	ram_addr;
-reg	[3:0]		total_entries=4'b0;
-reg	[24:0]	old_io_addr;
-reg	[24:0]	base_io_addr;
-reg	[24:0]	end_addr;
-reg	[24:0]	local_addr;
-wire	[23:0]	addr_base;
-wire	[7:0]		length;
-wire	[7:0]		start_val;
-wire	[7:0]		end_val;
-
+// Hiscore config and dump status 
 reg				downloading_config;
 reg				downloading_dump;
 reg				downloaded_config;
@@ -75,12 +42,48 @@ reg	[3:0]		initialised;
 assign downloading_config = ioctl_download && ioctl_wr && (ioctl_index==3);
 assign downloading_dump = ioctl_download && ioctl_wr && (ioctl_index==4);
 
+
+// Delay constants
+//reg [31:0] delay_default = 21'h1FFFFF;
+//reg [31:0] delay_default = 25'h1FFFFFF; // 2.8 seconds
+//reg [31:0] delay_default = 24'hFFFFFF; // 1.4 seconds
+//reg [31:0] delay_default = 24'h7FFFFF; // 0.7 seconds
+//reg [31:0] delay_default = 24'h3FFFFF; // 0.35 seconds
+//reg [31:0] delay_default = 24'h1FFFFF; // 0.175 seconds
+reg [31:0] delay_default = 24'hFFFF;		// Default initial delay before highscore load begins (overridden by delay from module inputs if supplied)
+reg [31:0] read_defaultwait = 24'hFFFF;	// Delay between start/end check attempts
+reg [31:0] read_defaultcheck = 4'b1111;	// Duration of start/end check attempt (>1 loop to allow pause/mux based access to settle)
+
+assign ram_address = ram_addr[ADDRESSWIDTH-1:0];
+
+reg	[3:0]		state = 4'b0000;
+reg	[3:0]		next_state = 4'b0000;
+reg	[31:0]	wait_timer;
+reg				ram_read = 1'b0;
+
+reg	[7:0]		ioctl_dout_r2;
+reg	[7:0]		ioctl_dout_r3;
+reg	[4:0]		counter = 4'b0;
+reg				reset_last = 1'b0;
+reg	[7:0]		last_index;
+reg				last_ioctl_download=0;
+reg	[24:0]	ram_addr;
+reg	[4:0]		total_entries=4'b0;
+reg	[24:0]	old_io_addr;
+reg	[24:0]	base_io_addr;
+wire	[23:0]	addr_base;
+reg	[24:0]	end_addr;
+reg	[24:0]	local_addr;
+wire	[7:0]		length;
+wire	[7:0]		start_val;
+wire	[7:0]		end_val;
+
 // RAM chunks used to store configuration data
 // - address_table
 // - length_table
 // - startdata_table
 // - enddata_table
-dpram #(.aWidth(4),.dWidth(24))
+dpram_hs #(.aWidth(4),.dWidth(24))
 address_table(
 	.addr_a(ioctl_addr[6:3]),
 	.clk_a(clk),
@@ -91,7 +94,7 @@ address_table(
 	.addr_b(counter)
 );
 
-dpram #(.aWidth(4),.dWidth(8))
+dpram_hs #(.aWidth(4),.dWidth(8))
 length_table(
 	.addr_a(ioctl_addr[6:3]),
 	.clk_a(clk),
@@ -101,7 +104,7 @@ length_table(
 	.q_b(length),
 	.addr_b(counter)
 );
-dpram #(.aWidth(4),.dWidth(8))
+dpram_hs #(.aWidth(4),.dWidth(8))
 startdata_table(
 	.addr_a(ioctl_addr[6:3]),
 .clk_a(clk),
@@ -111,7 +114,7 @@ startdata_table(
 	.q_b(start_val),
 	.addr_b(counter)
 );
-dpram #(.aWidth(4),.dWidth(8))
+dpram_hs #(.aWidth(4),.dWidth(8))
 enddata_table(
 	.addr_a(ioctl_addr[6:3]),
 	.clk_a(clk),
@@ -123,7 +126,7 @@ enddata_table(
 );
 
 // RAM chunk used to store hiscore data
-dpram #(.aWidth(8),.dWidth(8))
+dpram_hs #(.aWidth(8),.dWidth(8))
 hiscoredata (
 	.clk_a(clk),
 	.we_a(downloading_dump),
@@ -145,7 +148,7 @@ begin
 		if(ioctl_wr & ~ioctl_addr[2] & ~ioctl_addr[1] &  ioctl_addr[0]) ioctl_dout_r2 <= ioctl_dout;
 		if(ioctl_wr & ~ioctl_addr[2] & ioctl_addr[1] & ~ioctl_addr[0]) ioctl_dout_r3 <= ioctl_dout;
 		// Keep track of the largest entry during config download
-		total_entries <= ioctl_addr[6:3];
+		total_entries <= ioctl_addr[7:3];
 	end
 	
 	// Track completion of configuration and dump download
@@ -179,7 +182,6 @@ begin
 		pause <= ioctl_upload | ram_write | ram_read;
 		
 		// Upload scores to HPS
-//		if (ioctl_upload == 1'b1 && mode == 1'b0) 
 		if (ioctl_upload == 1'b1)
 		begin
 		
@@ -212,7 +214,6 @@ begin
 					// Setup base addresses
 					local_addr <= 25'b0;
 					base_io_addr <= 25'b0;
-					read_attempt <= 1'b0;
 					// Set address for start check
 					ram_read <= 1'b0;
 					// Set wait timer
@@ -235,8 +236,7 @@ begin
 						// Check for matching start value
 						if(ioctl_din == start_val)
 						begin
-						// - If match then reset read attempts, stop ram_read and reset timer for end check
-							read_attempt <= 1'b0;
+						// - If match then stop ram_read and reset timer for end check
 							ram_read <= 1'b0;
 							next_state <= 4'b0011;
 							state <= 4'b1111;
@@ -253,7 +253,6 @@ begin
 								// - If no match after read wait then stop ram_read and retry
 								next_state <= 4'b0001;
 								state <= 4'b1111;
-								read_attempt <= read_attempt + 1'b1;
 								ram_read <= 1'b0;
 								wait_timer <= read_defaultwait;
 							end
@@ -305,7 +304,6 @@ begin
 								// - If no match after read wait then stop ram_read and retry
 								next_state <= 4'b0011;
 								state <= 4'b1111;
-								read_attempt <= read_attempt + 1'b1;
 								ram_read <= 1'b0;
 								wait_timer <= read_defaultwait;
 							end
@@ -337,13 +335,6 @@ begin
 						end
 						ram_write <= 1'b0;
 					end
-
-//				4'b0111:
-//					begin // our local ram should be correct, 
-//						state <= 4'b0110;
-//						ram_addr <= {1'b0, addr_base};
-//						ram_write <= 1'b1;
-//					end
 
 				4'b1000:
 					begin
@@ -381,6 +372,49 @@ begin
 		end
 	end
 	old_io_addr<=ioctl_addr;
+end
+
+endmodule
+
+module dpram_hs #(
+	parameter dWidth=8,
+	parameter aWidth=8
+)(
+	input								clk_a,
+	input			[aWidth-1:0]	addr_a,
+	input			[dWidth-1:0]	d_a,
+	input								we_a,
+	output reg	[dWidth-1:0]	q_a,
+	
+	input								clk_b,
+	input			[aWidth-1:0]	addr_b,
+	input			[dWidth-1:0]	d_b,
+	input								we_b,
+	output reg	[dWidth-1:0]	q_b
+);
+
+reg [dWidth-1:0] ram [2**aWidth-1:0];
+
+always @(posedge clk_a) begin
+	if (we_a) begin 
+		ram[addr_a] <= d_a;
+		q_a <= d_a;
+	end
+	else
+	begin
+		q_a <= ram[addr_a];
+	end
+end
+
+always @(posedge clk_b) begin
+	if (we_b) begin 
+		ram[addr_b] <= d_b;
+		q_b <= d_b;
+	end
+	else
+	begin
+		q_b <= ram[addr_b];
+	end
 end
 
 endmodule
