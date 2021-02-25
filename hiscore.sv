@@ -40,10 +40,10 @@ Hiscore config structure
 */
 
 // Hiscore config and dump status 
-reg				downloading_config;
-reg				downloading_dump;
-reg				downloaded_config;
-reg				downloaded_dump;
+reg				downloading_config = 1'b0;
+reg				downloading_dump = 1'b0;
+reg				downloaded_config = 1'b0;
+reg				downloaded_dump = 1'b0;
 reg	[3:0]		initialised;
 
 assign downloading_config = ioctl_download && ioctl_wr && (ioctl_index==3);
@@ -183,7 +183,7 @@ begin
 		pause <= ioctl_upload | ram_write | ram_read;
 		
 		// Upload scores to HPS
-		if (ioctl_upload == 1'b1)
+		if (ioctl_upload == 1'b1 && ioctl_index==4)
 		begin
 		
 			// generate addresses to read high score from game memory. Base addresses off ioctl_address

@@ -2,7 +2,7 @@
 
 This is a module for MiSTer arcade cores which enables high score save/load based on the MAME hiscore plugin.
 
-Created by @alanswx, further development by @jimmystones
+Created by [alanswx](https://github.com/alanswx), further development by [JimmyStones](https://github.com/jimmystones)
 
 ## Features
 - Reads hiscore.dat entries from MRA (ioctl index = 3)
