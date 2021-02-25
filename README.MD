@@ -1,8 +1,10 @@
 # Hiscores_MiSTer
 
-This is a module for MiSTer arcade cores which enables high score save/load based on the MAME hiscore plugin.
+This is a generic module for MiSTer arcade cores which enables high score save/load based on the MAME hiscore plugin data format (hiscore.dat).
 
-Created by [alanswx](https://github.com/alanswx), further development by [JimmyStones](https://github.com/jimmystones)
+Created by Alan Steremberg ([alanswx](https://github.com/alanswx))
+
+Further development by Jim Gregory ([JimmyStones](https://github.com/jimmystones))
 
 ## Features
 - Reads hiscore.dat entries from MRA (ioctl index = 3)
@@ -31,7 +33,6 @@ hiscore #(
 	.CFG_ADDRESSWIDTH(4),
 	.DELAY_CHECKWAIT(6'b111111),
 	.DELAY_CHECKHOLD(1'b0)
-	
 ) hi (
 	.clk(clk_sys),
 	.reset(reset),
@@ -60,13 +61,40 @@ If hiscores are located in multiple RAM areas then some multiplexing will be nee
 
 If RAM is already dual-ported then the pause signal can be used to switch inputs to one of the ports during highscore access (see [Sega System 1](https://github.com/MiSTer-devel/Arcade_SEGASYS1-MiSTer) for a particularly complex example!)
 
-
 ### Module parameters
 - HS_ADDRESSWIDTH - Set to the widest memory address used by the core.  The upper size of hs_address should should be set to the same -1.
 - CFG_ADDRESSWIDTH - Set to allow for the maximum number of hiscore.dat entry lines used by the core (e.g. 4 = 16 max)
 - DELAY_CHECKWAIT - Number of cycles to wait between start/end checks (use in conjunction with pause to avoid locking up cpu)
 - DELAY_CHECKHOLD - Number of cycles to wait during start/end checks (use to allow multiplexers to settle)
 
+### Module ports
+| Port           | Direction | Description 
+| -------------- | --------- | ----------- 
+| clk            | in        | System clock.  Should match the HPS IO clock input 
+| reset          | in        | Active-high reset signal from core
+| delay          | in        | 32-bit value to override default delay before writing hiscores to RAM
+| ioctl_upload   | in        | From HPS module
+| ioctl_download | in        | From HPS module
+| ioctl_wr       | in        | From HPS module
+| ioctl_addr     | in        | From HPS module
+| ioctl_dout     | in        | From HPS module
+| ioctl_din      | in        | From HPS module
+| ioctl_index    | in        | From HPS module
+| ram_address    | out       | System RAM address for highscore read/write
+| data_to_ram    | out       | Data to write to system RAM
+| ram_write      | out       | Active-high signal to write to system RAM
+| pause          | out       | Active-high signal to pause CPU for complex RAM situations
+
+### Notes
+
 _Pause_
 
 For cores which require multiplexing due to scores being split across multiple RAM banks, an optional active-high pause signal is triggered while the high score module is reading or writing game RAM.
+
+_Calculating delays_
+
+Delays should be calculated based on the clock passed to the hiscore module - e.g. for a 48MHz clock, a 10 second delay should be 48 \* 1000 \* 1000 \* 10 = 31'h1C9C3800;
+
+## License
+
+This program is free software: you can redistribute it and/or modify it under the terms of the GNU General Public License as published by the Free Software Foundation, either version 3 of the License, or (at your option) any later version.
