@@ -85,6 +85,53 @@ If RAM is already dual-ported then the pause signal can be used to switch inputs
 | ram_write      | out       | Active-high signal to write to system RAM
 | pause          | out       | Active-high signal to pause CPU for complex RAM situations
 
+### MRA data
+
+To enable the high score module add the following sections to the MRA.
+
+#### MRA sections
+```xml
+<rom index="3" md5="none">
+	<part>
+		00 00 90 5F 01 30 30 00 
+		00 00 90 7F 01 30 30 00 
+		00 00 90 9F 01 30 30 00 
+		00 00 90 BF 01 30 30 00 
+		00 00 90 DE 03 53 24 00 
+		00 00 90 FE 03 2D 24 00 
+		00 00 91 1F 01 00 00 00 
+		00 00 91 3F 01 00 00 00 
+		00 00 80 E2 04 00 00 00 
+		00 00 81 00 96 00 FF 00 
+	</part>
+</rom>
+<nvram index="4" size="166"/>
+```
+
+The ```<rom index="3">``` section contains data from the MAME hiscore.dat entries in the following structure:
+
+- 4 bytes		Address of ram entry (in core memory map)
+- 1 byte		Length of ram entry in bytes
+- 1 byte		Start value to check for at start of address range before proceeding
+- 1 byte		End value to check for at end of address range before proceeding
+- 1 byte		(padding)
+
+Below is the original hiscore.dat entry for the example above (Bomb Jack)
+```
+@:maincpu,program,905f,1,30,30
+@:maincpu,program,907f,1,30,30
+@:maincpu,program,909f,1,30,30
+@:maincpu,program,90bf,1,30,30
+@:maincpu,program,90de,3,53,24
+@:maincpu,program,90fe,3,2d,24
+@:maincpu,program,911f,1,00,00
+@:maincpu,program,913f,1,00,00
+@:maincpu,program,80e2,4,00,00
+@:maincpu,program,8100,96,00,ff
+```
+
+The size attribute in ```<nvram index="4" size="?"> section should be the total of all lengths in the entry table.
+
 ### Notes
 
 _Pause_
