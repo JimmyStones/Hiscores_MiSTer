@@ -2,7 +2,7 @@
 
 This is a module for MiSTer arcade cores which enables high score save/load based on the MAME hiscore plugin.
 
-Written by @alanswx, further development by @jimmystones
+Created by @alanswx, further development by @jimmystones
 
 ## Features
 - Reads hiscore.dat entries from MRA (ioctl index = 3)
@@ -15,7 +15,6 @@ Written by @alanswx, further development by @jimmystones
 ## Implementation
 
 - Add hiscore.sv to rtl/ folder and files.qip
-
 - Add the following code to the main core .sv file. 
 
 ```verilog
@@ -50,6 +49,18 @@ hiscore #(
 	.pause(hs_pause)
 );
 ```
+
+### Core specific implementation
+
+Add code to link the high score signals into the relevant RAM instances.  
+
+In simple cases (see [Phoenix](https://github.com/MiSTer-devel/Arcade_Phoenix-MiSTer) core for an example) this will only involve converting a working RAM instance from single to dual port.  
+
+If hiscores are located in multiple RAM areas then some multiplexing will be needed to merge/split based on hs_address.  
+
+If RAM is already dual-ported then the pause signal can be used to switch inputs to one of the ports during highscore access (see [Sega System 1](https://github.com/MiSTer-devel/Arcade_SEGASYS1-MiSTer) for a particularly complex example!)
+
+
 ### Module parameters
 - HS_ADDRESSWIDTH - Set to the widest memory address used by the core.  The upper size of hs_address should should be set to the same -1.
 - CFG_ADDRESSWIDTH - Set to allow for the maximum number of hiscore.dat entry lines used by the core (e.g. 4 = 16 max)
