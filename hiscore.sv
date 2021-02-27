@@ -56,7 +56,7 @@ Hiscore config structure (CFG_LENGTHWIDTH=1)
 [   ADDR  ] LEN START END PAD
 
 4 bytes		Address of ram entry (in core memory map)
-1 byte		Length of ram entry in bytes
+1 byte		Length of ram entry in bytes 
 1 byte		Start value to check for at start of address range before proceeding
 1 byte		End value to check for at end of address range before proceeding
 1 byte		(padding)
@@ -132,42 +132,38 @@ reg	[7:0]								length_data_b2;
 // - enddata_table
 dpram_hs #(.aWidth(CFG_ADDRESSWIDTH),.dWidth(24))
 address_table(
+	.clk(clk),
 	.addr_a(ioctl_addr[CFG_ADDRESSWIDTH+2:3]),
-	.clk_a(clk),
 	.d_a(address_data_in), // ignore first byte
 	.we_a(address_we),
-	.clk_b(clk),
 	.q_b(addr_base),
 	.addr_b(counter)
 );
 // Length table - variable width depending on CFG_LENGTHWIDTH
 dpram_hs #(.aWidth(CFG_ADDRESSWIDTH),.dWidth(CFG_LENGTHWIDTH*8))
 length_table(
+	.clk(clk),
 	.addr_a(ioctl_addr[CFG_ADDRESSWIDTH+2:3]),
-	.clk_a(clk),
 	.d_a(length_data_in),
 	.we_a(length_we),
-	.clk_b(clk),
 	.q_b(length),
 	.addr_b(counter)
 );
 dpram_hs #(.aWidth(CFG_ADDRESSWIDTH),.dWidth(8))
 startdata_table(
+	.clk(clk),
 	.addr_a(ioctl_addr[CFG_ADDRESSWIDTH+2:3]),
-	.clk_a(clk),
 	.d_a(ioctl_dout),
 	.we_a(startdata_we), 
-	.clk_b(clk),
 	.q_b(start_val),
 	.addr_b(counter)
 );
 dpram_hs #(.aWidth(CFG_ADDRESSWIDTH),.dWidth(8))
 enddata_table(
+	.clk(clk),
 	.addr_a(ioctl_addr[CFG_ADDRESSWIDTH+2:3]),
-	.clk_a(clk),
 	.d_a(ioctl_dout),
 	.we_a(enddata_we),
-	.clk_b(clk),
 	.q_b(end_val),
 	.addr_b(counter)
 );
@@ -175,11 +171,10 @@ enddata_table(
 // RAM chunk used to store hiscore data
 dpram_hs #(.aWidth(8),.dWidth(8))
 hiscoredata (
-	.clk_a(clk),
+	.clk(clk),
 	.we_a(downloading_dump),
 	.addr_a(ioctl_addr[7:0]),
 	.d_a(ioctl_dout),
-	.clk_b(clk),
 	.addr_b(local_addr[7:0]),
 	.we_b(ioctl_upload), 
 	.d_b(ioctl_din),
@@ -428,13 +423,13 @@ module dpram_hs #(
 	parameter dWidth=8,
 	parameter aWidth=8
 )(
-	input								clk_a,
+	input								clk,
+
 	input			[aWidth-1:0]	addr_a,
 	input			[dWidth-1:0]	d_a,
 	input								we_a,
 	output reg	[dWidth-1:0]	q_a,
-	
-	input								clk_b,
+
 	input			[aWidth-1:0]	addr_b,
 	input			[dWidth-1:0]	d_b,
 	input								we_b,
@@ -443,7 +438,7 @@ module dpram_hs #(
 
 reg [dWidth-1:0] ram [2**aWidth-1:0];
 
-always @(posedge clk_a) begin
+always @(posedge clk) begin
 	if (we_a) begin 
 		ram[addr_a] <= d_a;
 		q_a <= d_a;
@@ -452,9 +447,7 @@ always @(posedge clk_a) begin
 	begin
 		q_a <= ram[addr_a];
 	end
-end
 
-always @(posedge clk_b) begin
 	if (we_b) begin 
 		ram[addr_b] <= d_b;
 		q_b <= d_b;
