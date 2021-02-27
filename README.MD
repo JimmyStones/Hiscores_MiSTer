@@ -26,7 +26,7 @@ Further development by Jim Gregory ([JimmyStones](https://github.com/jimmystones
 wire [15:0]hs_address;
 wire [7:0]hs_to_ram;
 wire hs_write;
-wire hs_pause;
+wire hs_access;
 
 hiscore #(
 	.HS_ADDRESSWIDTH(16),
@@ -47,7 +47,7 @@ hiscore #(
 	.ram_address(hs_address),
 	.data_to_ram(hs_to_ram),
 	.ram_write(hs_write),
-	.pause(hs_pause)
+	.ram_access(hs_access)
 );
 ```
 
@@ -59,11 +59,12 @@ In simple cases (see [Phoenix](https://github.com/MiSTer-devel/Arcade_Phoenix-Mi
 
 If hiscores are located in multiple RAM areas then some multiplexing will be needed to merge/split based on hs_address.  
 
-If RAM is already dual-ported then the pause signal can be used to switch inputs to one of the ports during highscore access (see [Sega System 1](https://github.com/MiSTer-devel/Arcade_SEGASYS1-MiSTer) for a particularly complex example!)
+If RAM is already dual-ported then the access signal can be used to puase CPU and switch inputs to one of the ports during highscore access (see [Sega System 1](https://github.com/MiSTer-devel/Arcade_SEGASYS1-MiSTer) for a particularly complex example!)
 
 ### Module parameters
 - HS_ADDRESSWIDTH - Set to the widest memory address used by the core.  The upper size of hs_address should should be set to the same -1.
 - CFG_ADDRESSWIDTH - Set to allow for the maximum number of hiscore.dat entry lines used by the core (e.g. 4 = 16 max)
+- CFG_LENGTHWIDTH - Set to 1 for single byte length, 2 for double
 - DELAY_CHECKWAIT - Number of cycles to wait between start/end checks (use in conjunction with pause to avoid locking up cpu)
 - DELAY_CHECKHOLD - Number of cycles to wait during start/end checks (use to allow multiplexers to settle)
 
@@ -83,7 +84,7 @@ If RAM is already dual-ported then the pause signal can be used to switch inputs
 | ram_address    | out       | System RAM address for highscore read/write
 | data_to_ram    | out       | Data to write to system RAM
 | ram_write      | out       | Active-high signal to write to system RAM
-| pause          | out       | Active-high signal to pause CPU for complex RAM situations
+| ram_access     | out       | Active-high signal used to pause CPU for complex RAM situations
 
 ### MRA data
 
@@ -108,7 +109,7 @@ To enable the high score module add the following sections to the MRA.
 <nvram index="4" size="166"/>
 ```
 
-The ```<rom index="3">``` section contains data from the MAME hiscore.dat entries in the following structure:
+The ```<rom index="3">``` section contains data from the MAME hiscore.dat entries.  If CFG_LENGTHWIDTH=1 then the following structure is used:
 
 - 4 bytes		Address of ram entry (in core memory map)
 - 1 byte		Length of ram entry in bytes
@@ -129,6 +130,13 @@ Below is the original hiscore.dat entry for the example above (Bomb Jack)
 @:maincpu,program,80e2,4,00,00
 @:maincpu,program,8100,96,00,ff
 ```
+
+If CFG_LENGTHWIDTH=2 then the following structure is used:
+
+- 4 bytes		Address of ram entry (in core memory map)
+- 2 byte		Length of ram entry in bytes
+- 1 byte		Start value to check for at start of address range before proceeding
+- 1 byte		End value to check for at end of address range before proceeding
 
 The size attribute in ```<nvram index="4" size="?"> section should be the total of all lengths in the entry table.
 

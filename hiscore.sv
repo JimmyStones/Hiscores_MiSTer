@@ -25,6 +25,7 @@ module hiscore
 #(
 	parameter HS_ADDRESSWIDTH=10,							// Max size of game RAM address for highscores
 	parameter CFG_ADDRESSWIDTH=4,							// Max size of RAM address for highscore.dat entries (default 4 = 16 entries max)
+	parameter CFG_LENGTHWIDTH=1,							// Max size of length for each highscore.dat entries (default 1 byte = 255)
 	parameter DELAY_CHECKWAIT=6'b111111,				// Delay between start/end check attempts
 	parameter DELAY_CHECKHOLD=3'b111					// Hold time for start/end check reads (allows mux to settle)
 )
@@ -44,11 +45,11 @@ module hiscore
 	output	[HS_ADDRESSWIDTH-1:0]	ram_address,	// Address in game RAM to read/write score data
 	output	[7:0]							data_to_ram,	// Data to write to game RAM
 	output	reg							ram_write,		// Write to game RAM (active high)
-	output	reg							pause				// Pause game (active high)
+	output	reg							ram_access		// RAM read or write required (active high)
 );
 
 /*
-Hiscore config structure
+Hiscore config structure (CFG_LENGTHWIDTH=1)
 ------------------------
 00 00 43 0b  0f    10  01  00
 00 00 40 23  02    04  12  00
@@ -59,6 +60,18 @@ Hiscore config structure
 1 byte		Start value to check for at start of address range before proceeding
 1 byte		End value to check for at end of address range before proceeding
 1 byte		(padding)
+
+
+Hiscore config structure (CFG_LENGTHWIDTH=2)
+------------------------
+00 00 43 0b  00 0f    10  01
+00 00 40 23  00 02    04  12
+[   ADDR  ] [LEN ] START END
+
+4 bytes		Address of ram entry (in core memory map)
+2 bytes		Length of ram entry in bytes 
+1 byte		Start value to check for at start of address range before proceeding
+1 byte		End value to check for at end of address range before proceeding
 
 */
 
@@ -92,16 +105,25 @@ reg	[7:0]								last_ioctl_index;			// Last cycle HPS IO index
 reg										last_ioctl_download=0;	// Last cycle HPS IO download
 
 reg	[24:0]							ram_addr;					// Target RAM address for hiscore read/write
-reg	[7:0]								ioctl_dout_r2;				
-reg	[7:0]								ioctl_dout_r3;
 reg	[24:0]							old_io_addr;
 reg	[24:0]							base_io_addr;
 wire	[23:0]							addr_base;
 reg	[24:0]							end_addr;
 reg	[24:0]							local_addr;
-wire	[7:0]								length;
+wire	[(CFG_LENGTHWIDTH*8)-1:0]	length;
 wire	[7:0]								start_val;
 wire	[7:0]								end_val;
+
+wire address_we = downloading_config & (ioctl_addr[2:0] == 3'd3);
+wire length_we = downloading_config & (ioctl_addr[2:0] == 3'd3 + CFG_LENGTHWIDTH);
+wire startdata_we = downloading_config & (ioctl_addr[2:0] == 3'd4 + CFG_LENGTHWIDTH); 
+wire enddata_we = downloading_config & (ioctl_addr[2:0] == 3'd5 + CFG_LENGTHWIDTH);
+
+wire [23:0]								address_data_in = {address_data_b3, address_data_b2, ioctl_dout};
+wire [(CFG_LENGTHWIDTH*8)-1:0]	length_data_in = (CFG_LENGTHWIDTH == 1'b1) ? ioctl_dout : {length_data_b2, ioctl_dout};
+reg	[7:0]								address_data_b3;
+reg	[7:0]								address_data_b2;
+reg	[7:0]								length_data_b2;
 
 // RAM chunks used to store configuration data
 // - address_table
@@ -112,18 +134,19 @@ dpram_hs #(.aWidth(CFG_ADDRESSWIDTH),.dWidth(24))
 address_table(
 	.addr_a(ioctl_addr[CFG_ADDRESSWIDTH+2:3]),
 	.clk_a(clk),
-	.d_a({ioctl_dout_r2,  ioctl_dout_r3, ioctl_dout}), // ignore first byte
-	.we_a(downloading_config & ~ioctl_addr[2] &  ioctl_addr[1] & ioctl_addr[0]),
+	.d_a(address_data_in), // ignore first byte
+	.we_a(address_we),
 	.clk_b(clk),
 	.q_b(addr_base),
 	.addr_b(counter)
 );
-dpram_hs #(.aWidth(CFG_ADDRESSWIDTH),.dWidth(8))
+// Length table - variable width depending on CFG_LENGTHWIDTH
+dpram_hs #(.aWidth(CFG_ADDRESSWIDTH),.dWidth(CFG_LENGTHWIDTH*8))
 length_table(
 	.addr_a(ioctl_addr[CFG_ADDRESSWIDTH+2:3]),
 	.clk_a(clk),
-	.d_a(ioctl_dout),
-	.we_a(downloading_config & ioctl_addr[2] & ~ioctl_addr[1] & ~ioctl_addr[0]), // ADDR b100
+	.d_a(length_data_in),
+	.we_a(length_we),
 	.clk_b(clk),
 	.q_b(length),
 	.addr_b(counter)
@@ -131,9 +154,9 @@ length_table(
 dpram_hs #(.aWidth(CFG_ADDRESSWIDTH),.dWidth(8))
 startdata_table(
 	.addr_a(ioctl_addr[CFG_ADDRESSWIDTH+2:3]),
-.clk_a(clk),
+	.clk_a(clk),
 	.d_a(ioctl_dout),
-	.we_a(downloading_config & ioctl_addr[2] & ~ioctl_addr[1] & ioctl_addr[0]), // ADDR b101
+	.we_a(startdata_we), 
 	.clk_b(clk),
 	.q_b(start_val),
 	.addr_b(counter)
@@ -143,7 +166,7 @@ enddata_table(
 	.addr_a(ioctl_addr[CFG_ADDRESSWIDTH+2:3]),
 	.clk_a(clk),
 	.d_a(ioctl_dout),
-	.we_a(downloading_config & ioctl_addr[2] & ioctl_addr[1] & ~ioctl_addr[0]), // ADDR b110
+	.we_a(enddata_we),
 	.clk_b(clk),
 	.q_b(end_val),
 	.addr_b(counter)
@@ -168,9 +191,10 @@ always @(posedge clk)
 begin
 	if (downloading_config)
 	begin
-		// Save configuration data into tables
-		if(ioctl_wr & ~ioctl_addr[2] & ~ioctl_addr[1] &  ioctl_addr[0]) ioctl_dout_r2 <= ioctl_dout;
-		if(ioctl_wr & ~ioctl_addr[2] & ioctl_addr[1] & ~ioctl_addr[0]) ioctl_dout_r3 <= ioctl_dout;
+		// Save configuration data into tables  
+		if(ioctl_wr & (ioctl_addr[2:0] == 3'd1)) address_data_b3 <= ioctl_dout;
+		if(ioctl_wr & (ioctl_addr[2:0] == 3'd2)) address_data_b2 <= ioctl_dout;
+		if(ioctl_wr & (ioctl_addr[2:0] == 3'd4)) length_data_b2 <= ioctl_dout;
 		// Keep track of the largest entry during config download
 		total_entries <= ioctl_addr[CFG_ADDRESSWIDTH+2:3];
 	end
@@ -202,8 +226,8 @@ begin
 		end
 		reset_last <= reset;
 
-		// activate pause signal when necessary
-		pause <= ioctl_upload | ram_write | ram_read;
+		// activate access signal when necessary
+		ram_access <= ioctl_upload | ram_write | ram_read;
 		
 		// Upload scores to HPS
 		if (ioctl_upload == 1'b1 && ioctl_index==4)
