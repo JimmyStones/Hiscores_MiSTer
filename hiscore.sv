@@ -1,5 +1,6 @@
 //============================================================================
 //  MAME hiscore.dat support for MiSTer arcade cores.
+//  V-0001
 //
 //  https://github.com/JimmyStones/Hiscores_MiSTer
 //
@@ -19,6 +20,9 @@
 //  You should have received a copy of the GNU General Public License along
 //  with this program; if not, write to the Free Software Foundation, Inc.,
 //  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+//============================================================================
+// Version history:
+// 0001 - 2021-03-06 - First marked release
 //============================================================================
 
 module hiscore 
@@ -134,46 +138,46 @@ dpram_hs #(.aWidth(CFG_ADDRESSWIDTH),.dWidth(24))
 address_table(
 	.clk(clk),
 	.addr_a(ioctl_addr[CFG_ADDRESSWIDTH+2:3]),
-	.d_a(address_data_in), // ignore first byte
 	.we_a(address_we),
-	.q_b(addr_base),
-	.addr_b(counter)
+	.d_a(address_data_in),
+	.addr_b(counter),
+	.q_b(addr_base)
 );
 // Length table - variable width depending on CFG_LENGTHWIDTH
 dpram_hs #(.aWidth(CFG_ADDRESSWIDTH),.dWidth(CFG_LENGTHWIDTH*8))
 length_table(
 	.clk(clk),
 	.addr_a(ioctl_addr[CFG_ADDRESSWIDTH+2:3]),
-	.d_a(length_data_in),
 	.we_a(length_we),
-	.q_b(length),
-	.addr_b(counter)
+	.d_a(length_data_in),
+	.addr_b(counter),
+	.q_b(length)
 );
 dpram_hs #(.aWidth(CFG_ADDRESSWIDTH),.dWidth(8))
 startdata_table(
 	.clk(clk),
 	.addr_a(ioctl_addr[CFG_ADDRESSWIDTH+2:3]),
-	.d_a(ioctl_dout),
 	.we_a(startdata_we), 
-	.q_b(start_val),
-	.addr_b(counter)
+	.d_a(ioctl_dout),
+	.addr_b(counter),
+	.q_b(start_val)
 );
 dpram_hs #(.aWidth(CFG_ADDRESSWIDTH),.dWidth(8))
 enddata_table(
 	.clk(clk),
 	.addr_a(ioctl_addr[CFG_ADDRESSWIDTH+2:3]),
-	.d_a(ioctl_dout),
 	.we_a(enddata_we),
-	.q_b(end_val),
-	.addr_b(counter)
+	.d_a(ioctl_dout),
+	.addr_b(counter),
+	.q_b(end_val)
 );
 
 // RAM chunk used to store hiscore data
 dpram_hs #(.aWidth(8),.dWidth(8))
 hiscoredata (
 	.clk(clk),
-	.we_a(downloading_dump),
 	.addr_a(ioctl_addr[7:0]),
+	.we_a(downloading_dump),
 	.d_a(ioctl_dout),
 	.addr_b(local_addr[7:0]),
 	.we_b(ioctl_upload), 
@@ -244,7 +248,7 @@ begin
 			ram_addr <= addr_base + (ioctl_addr - base_io_addr);
 			// Set local addresses to update cached dump in case of reset
 			local_addr <= ioctl_addr;
-			// Mark dump as readable
+			// Mark dump as readable in case of reset
 			downloaded_dump <= 1'b1;
 		end
 		
@@ -265,9 +269,8 @@ begin
 					wait_timer <= read_defaultwait;
 				end
 
-				4'b0001: // Start check prepare and wait
+				4'b0001: // Set start check address, enable ram read and move to start check state
 				begin
-					// Set start check address, enable ram read and move to start check state
 					ram_addr <= {1'b0, addr_base};
 					ram_read <= 1'b1;
 					state <= 4'b0010;
@@ -302,9 +305,8 @@ begin
 						end
 					end
 
-				4'b0011: // End check prepare and wait
+				4'b0011: // Set end check address, enable ram read and move to end check state
 				begin
-					// Set end check address, enable ram read and move to end check state
 					ram_addr <= end_addr;
 					ram_read <= 1'b1;
 					state <= 4'b0100;
@@ -379,19 +381,17 @@ begin
 						ram_write <= 1'b0;
 					end
 
-				4'b1000:
+				4'b1000: // Hiscore write to RAM completed
 					begin
-						// Hiscore write back complete
 						ram_write <= 1'b0;
 					end
 
 				4'b1001:  // counter is correct, next state the output of our local ram will be correct
 					begin
-//						state <= 4'b0111;
 						state <= 4'b1010;
 					end
 
-				4'b1010: // local ram is  correct
+				4'b1010: // local ram is correct
 					begin
 						state <= 4'b1110;
 						ram_addr <= addr_base + (local_addr - base_io_addr);
@@ -403,7 +403,6 @@ begin
 						state <= 4'b0110;
 					end
 					
-
 				4'b1111: // timer wait state
 					begin
 						if (wait_timer > 1'b0)

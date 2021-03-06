@@ -12,9 +12,15 @@ Further development by Jim Gregory ([JimmyStones](https://github.com/jimmystones
 - Configurable delay before high score load to game RAM 
 - Configurable delay between hiscore entry start/end checks
 - Configurable delay during hiscore RAM read/write
+- Configurable single or double byte entry lengths
 - Pause signal to halt CPU for during multiplex with cores already using dual-port RAM
 
-## Implementation
+## History
+Version | Release date | Notes
+--------| ------------ | -----
+0001 | 2021-03-06 | First marked release
+
+## Implementation instructions
 
 - Add hiscore.sv to rtl/ folder and files.qip
 - Add the following code to the main core .sv file. 
