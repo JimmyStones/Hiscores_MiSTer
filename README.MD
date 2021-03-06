@@ -7,8 +7,8 @@ Created by Alan Steremberg ([alanswx](https://github.com/alanswx))
 Further development by Jim Gregory ([JimmyStones](https://github.com/jimmystones))
 
 ## Features
-- Reads hiscore.dat entries from MRA (ioctl index = 3)
-- Loads and saves high score data in \<MRA name\>.nvm dump (ioctl index = 4)
+- Reads hiscore.dat entries from MRA (defaults to ioctl index = 3)
+- Loads and saves high score data in \<MRA name\>.nvm dump (defaults to ioctl index = 4)
 - Configurable delay before high score load to game RAM 
 - Configurable delay between hiscore entry start/end checks
 - Configurable delay during hiscore RAM read/write
@@ -16,13 +16,15 @@ Further development by Jim Gregory ([JimmyStones](https://github.com/jimmystones
 - Pause signal to halt CPU for during multiplex with cores already using dual-port RAM
 
 ## History
-Version | Release date | Notes
---------| ------------ | -----
-0001 | 2021-03-06 | First marked release
+### 0001 - 2021-03-06
+- First marked release
+### 0002 - 2021-03-06
+- Added HS_DUMPFORMAT localparam to identify dump version (for future use).
+- Add HS_CONFIGINDEX and HS_DUMPINDEX parameters to configure ioctl_indexes
 
 ## Implementation instructions
 
-- Add hiscore.sv to rtl/ folder and files.qip
+- Add hiscore.sv to ```rtl/``` folder and files.qip
 - Add the following code to the main core .sv file. 
 
 ```verilog
@@ -30,15 +32,19 @@ Version | Release date | Notes
 // --------------
 
 wire [15:0]hs_address;
-wire [7:0]hs_to_ram;
+wire [7:0]hs_data_in;
 wire hs_write;
 wire hs_access;
 
 hiscore #(
 	.HS_ADDRESSWIDTH(16),
+	.HS_CONFIGINDEX(3),
+	.HS_DUMPINDEX(4),
 	.CFG_ADDRESSWIDTH(4),
+	.CFG_LENGTHWIDTH(2),
 	.DELAY_CHECKWAIT(6'b111111),
 	.DELAY_CHECKHOLD(1'b0)
+)
 ) hi (
 	.clk(clk_sys),
 	.reset(reset),
@@ -51,7 +57,7 @@ hiscore #(
 	.ioctl_din(ioctl_din),
 	.ioctl_index(ioctl_index),
 	.ram_address(hs_address),
-	.data_to_ram(hs_to_ram),
+	.data_to_ram(hs_data_in),
 	.ram_write(hs_write),
 	.ram_access(hs_access)
 );
@@ -65,14 +71,18 @@ In simple cases (see [Phoenix](https://github.com/MiSTer-devel/Arcade_Phoenix-Mi
 
 If hiscores are located in multiple RAM areas then some multiplexing will be needed to merge/split based on hs_address.  
 
-If RAM is already dual-ported then the access signal can be used to puase CPU and switch inputs to one of the ports during highscore access (see [Sega System 1](https://github.com/MiSTer-devel/Arcade_SEGASYS1-MiSTer) for a particularly complex example!)
+If RAM is already dual-ported then the access signal can be used to pause CPU and switch inputs to one of the ports during highscore access (see [Sega System 1](https://github.com/MiSTer-devel/Arcade_SEGASYS1-MiSTer) for a particularly complex example!)
 
 ### Module parameters
-- HS_ADDRESSWIDTH - Set to the widest memory address used by the core.  The upper size of hs_address should should be set to the same -1.
-- CFG_ADDRESSWIDTH - Set to allow for the maximum number of hiscore.dat entry lines used by the core (e.g. 4 = 16 max)
-- CFG_LENGTHWIDTH - Set to 1 for single byte length, 2 for double
-- DELAY_CHECKWAIT - Number of cycles to wait between start/end checks (use in conjunction with pause to avoid locking up cpu)
-- DELAY_CHECKHOLD - Number of cycles to wait during start/end checks (use to allow multiplexers to settle)
+| Parameter | Description 
+| ----------| -----------
+| HS_ADDRESSWIDTH | Set to the widest memory address used by the core.  The upper size of hs_address should should be set to the same -1.
+| HS_CONFIGINDEX | Optional override of ioctl_index used for config download (default is 3)
+| HS_DUMPINDEX | Optional override of ioctl_index used for nvram dump download (default is 4)
+| CFG_ADDRESSWIDTH | Set to allow for the maximum number of hiscore.dat entry lines used by the core (e.g. 4 = 16 max)
+| CFG_LENGTHWIDTH | Set to 1 for single byte length, 2 for double
+| DELAY_CHECKWAIT | Number of cycles to wait between start/end checks (use in conjunction with pause to avoid locking up cpu)
+| DELAY_CHECKHOLD | Number of cycles to wait during start/end checks (use to allow multiplexers to settle)
 
 ### Module ports
 | Port           | Direction | Description 
@@ -144,13 +154,13 @@ If CFG_LENGTHWIDTH=2 then the following structure is used:
 - 1 byte		Start value to check for at start of address range before proceeding
 - 1 byte		End value to check for at end of address range before proceeding
 
-The size attribute in ```<nvram index="4" size="?"> section should be the total of all lengths in the entry table.
+The size attribute in ```<nvram index="4" size="?">``` should be the **decimal** total of all lengths in the entry table.
 
 ### Notes
 
 _Pause_
 
-For cores which require multiplexing due to scores being split across multiple RAM banks, an optional active-high pause signal is triggered while the high score module is reading or writing game RAM.
+For cores which require multiplexing due to scores being split across multiple RAM banks, the active-high **hs_access** signal is triggered while the high score module is reading or writing game RAM.
 
 _Calculating delays_
 

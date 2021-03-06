@@ -1,6 +1,5 @@
 //============================================================================
 //  MAME hiscore.dat support for MiSTer arcade cores.
-//  V-0001
 //
 //  https://github.com/JimmyStones/Hiscores_MiSTer
 //
@@ -21,17 +20,23 @@
 //  with this program; if not, write to the Free Software Foundation, Inc.,
 //  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
 //============================================================================
-// Version history:
-// 0001 - 2021-03-06 - First marked release
-//============================================================================
+/*
+ Version history:
+ 0001 - 2021-03-06 -	First marked release
+ 0002 - 2021-03-06 -	Added HS_DUMPFORMAT localparam to identify dump version (for future use)
+							Add HS_CONFIGINDEX and HS_DUMPINDEX parameters to configure ioctl_indexes 
+============================================================================
+*/
 
 module hiscore 
 #(
 	parameter HS_ADDRESSWIDTH=10,							// Max size of game RAM address for highscores
+	parameter HS_CONFIGINDEX=3,							// ioctl_index for config transfer
+	parameter HS_DUMPINDEX=4,								// ioctl_index for dump transfer
 	parameter CFG_ADDRESSWIDTH=4,							// Max size of RAM address for highscore.dat entries (default 4 = 16 entries max)
 	parameter CFG_LENGTHWIDTH=1,							// Max size of length for each highscore.dat entries (default 1 byte = 255)
 	parameter DELAY_CHECKWAIT=6'b111111,				// Delay between start/end check attempts
-	parameter DELAY_CHECKHOLD=3'b111					// Hold time for start/end check reads (allows mux to settle)
+	parameter DELAY_CHECKHOLD=3'b111						// Hold time for start/end check reads (allows mux to settle)
 )
 (
 	input										clk,
@@ -79,15 +84,23 @@ Hiscore config structure (CFG_LENGTHWIDTH=2)
 
 */
 
+localparam HS_DUMPFORMAT=1;	// Version identifier for dump format
+
+// HS_DUMPFORMAT = 1 --> No header, just the extracted hiscore data
+
+
 // Hiscore config and dump status 
-reg				downloading_config = 1'b0;
-reg				downloading_dump = 1'b0;
+reg				downloading_config;
+reg				downloading_dump;
+reg				uploading_dump;
 reg				downloaded_config = 1'b0;
 reg				downloaded_dump = 1'b0;
+reg				uploaded_dump = 1'b0;
 reg	[3:0]		initialised;
 
-assign downloading_config = ioctl_download && ioctl_wr && (ioctl_index==3);
-assign downloading_dump = ioctl_download && ioctl_wr && (ioctl_index==4);
+assign downloading_config = ioctl_download && ioctl_wr && (ioctl_index==HS_CONFIGINDEX);
+assign downloading_dump = ioctl_download && ioctl_wr && (ioctl_index==HS_DUMPINDEX);
+assign uploading_dump = ioctl_upload && (ioctl_index==HS_DUMPINDEX);
 
 // Delay constants
 reg	[31:0] delay_default = 24'hFFFF;							// Default initial delay before highscore load begins (overridden by delay from module inputs if supplied)
@@ -101,12 +114,13 @@ reg	[3:0]								next_state = 4'b0000;	// Next state machine index to move to af
 reg	[31:0]							wait_timer;					// Wait timer for inital/read/write delays
 reg										ram_read = 1'b0;			// Is RAM actively being read
 
-reg	[CFG_ADDRESSWIDTH-1:0]		counter = 4'b0;			// Index for current config table entry
-reg	[CFG_ADDRESSWIDTH-1:0]		total_entries=4'b0;		// Total count of config table entries
+reg	[CFG_ADDRESSWIDTH-1:0]		counter = 1'b0;			// Index for current config table entry
+reg	[CFG_ADDRESSWIDTH-1:0]		total_entries=1'b0;		// Total count of config table entries
 reg										reset_last = 1'b0;		// Last cycle reset
 
 reg	[7:0]								last_ioctl_index;			// Last cycle HPS IO index
 reg										last_ioctl_download=0;	// Last cycle HPS IO download
+reg										last_ioctl_upload=0;		// Last cycle HPS IO upload
 
 reg	[24:0]							ram_addr;					// Target RAM address for hiscore read/write
 reg	[24:0]							old_io_addr;
@@ -197,16 +211,34 @@ begin
 		// Keep track of the largest entry during config download
 		total_entries <= ioctl_addr[CFG_ADDRESSWIDTH+2:3];
 	end
-	
+
 	// Track completion of configuration and dump download
 	if ((last_ioctl_download != ioctl_download) && (ioctl_download == 1'b0))
 	begin
-		if (last_ioctl_index==3) downloaded_config <= 1'b1;
-		if (last_ioctl_index==4) downloaded_dump <= 1'b1;
+		if (last_ioctl_index==HS_CONFIGINDEX)
+		begin
+			downloaded_config <= 1'b1;
+		end
+		if (last_ioctl_index==HS_DUMPINDEX)
+		begin
+			downloaded_dump <= 1'b1;
+		end
+	end
+
+	// Track completion of dump upload
+	if ((last_ioctl_upload != ioctl_upload) && (ioctl_upload == 1'b0))
+	begin
+		if (last_ioctl_index==HS_DUMPINDEX)
+		begin
+			uploaded_dump <= 1'b1;
+			// Mark uploaded dump as readable in case of reset
+			downloaded_dump <= 1'b1;
+		end
 	end
 
 	// Track last ioctl values 
 	last_ioctl_download <= ioctl_download;
+	last_ioctl_upload <= ioctl_upload;
 	last_ioctl_index <= ioctl_index;
 
 	// Generate last address of entry to check end value
@@ -220,23 +252,22 @@ begin
 			wait_timer = (delay > 1'b0) ? delay : delay_default;
 			next_state <= 4'b0000;
 			state <= 4'b1111;
-			counter <= 4'b0;
+			counter <= 1'b0;
 			initialised <= initialised + 1'b1;
 		end
 		reset_last <= reset;
 
 		// activate access signal when necessary
-		ram_access <= ioctl_upload | ram_write | ram_read;
+		ram_access <= uploading_dump | ram_write | ram_read;
 		
 		// Upload scores to HPS
-		if (ioctl_upload == 1'b1 && ioctl_index==4)
+		if (uploading_dump == 1'b1)
 		begin
-		
 			// generate addresses to read high score from game memory. Base addresses off ioctl_address
 			if (ioctl_addr == 25'b0) begin
 				local_addr <= 25'b0;
 				base_io_addr <= 25'b0;
-				counter <= 4'b0000;
+				counter <= 1'b0000;
 			end
 			// Move to next entry when last address is reached
 			if (old_io_addr!=ioctl_addr && ram_addr==end_addr[24:0])
@@ -248,8 +279,6 @@ begin
 			ram_addr <= addr_base + (ioctl_addr - base_io_addr);
 			// Set local addresses to update cached dump in case of reset
 			local_addr <= ioctl_addr;
-			// Mark dump as readable in case of reset
-			downloaded_dump <= 1'b1;
 		end
 		
 		if (ioctl_upload == 1'b0 && downloaded_dump == 1'b1 && reset == 1'b0)
