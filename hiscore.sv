@@ -101,8 +101,8 @@ reg				downloaded_dump = 1'b0;
 reg				uploaded_dump = 1'b0;
 reg	[3:0]		initialised;
 
-assign downloading_config = ioctl_download && ioctl_wr && (ioctl_index==HS_CONFIGINDEX);
-assign downloading_dump = ioctl_download && ioctl_wr && (ioctl_index==HS_DUMPINDEX);
+assign downloading_config = ioctl_download && (ioctl_index==HS_CONFIGINDEX);
+assign downloading_dump = ioctl_download && (ioctl_index==HS_DUMPINDEX);
 assign uploading_dump = ioctl_upload && (ioctl_index==HS_DUMPINDEX);
 
 // Delay constants
@@ -250,8 +250,8 @@ begin
 
 	if(downloaded_config)
 	begin
-		// Check for state machine initalise/reset
-		if (initialised == 1'b0 || (reset_last == 1'b1 && reset == 1'b0))
+		// Check for end of state machine reset to initialise state machine
+		if (reset_last == 1'b1 && reset == 1'b0)
 		begin
 			wait_timer = (delay > 1'b0) ? delay : delay_default;
 			next_state <= 4'b0000;

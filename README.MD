@@ -83,6 +83,8 @@ If RAM is already dual-ported then the access signal can be used to pause CPU an
 | CFG_LENGTHWIDTH | Set to 1 for single byte length, 2 for double
 | DELAY_CHECKWAIT | Number of cycles to wait between start/end checks (use in conjunction with pause to avoid locking up cpu)
 | DELAY_CHECKHOLD | Number of cycles to wait during start/end checks (use to allow multiplexers to settle)
+| WRITE_REPEATCOUNT | Number of times to write score to game RAM - used to brute force cores that don't behave (defaults to 1)
+| WRITE_REPEATDELAY | Number of cycles delay between subsequent write attempts
 
 ### Module ports
 | Port           | Direction | Description 
@@ -158,9 +160,9 @@ The size attribute in ```<nvram index="4" size="?">``` should be the **decimal**
 
 ### Notes
 
-_Pause_
+_Multiplexing_
 
-For cores which require multiplexing due to scores being split across multiple RAM banks, the active-high **hs_access** signal is triggered while the high score module is reading or writing game RAM.
+For cores which require multiplexing due to scores being split across multiple RAM banks, or where RAM is already dual-ported, the active-high **hs_access** signal is triggered while the high score module is reading or writing game RAM.
 
 _Calculating delays_
 
