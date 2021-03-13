@@ -24,7 +24,8 @@
  Version history:
  0001 - 2021-03-06 -	First marked release
  0002 - 2021-03-06 -	Added HS_DUMPFORMAT localparam to identify dump version (for future use)
-							Add HS_CONFIGINDEX and HS_DUMPINDEX parameters to configure ioctl_indexes 
+							Add HS_CONFIGINDEX and HS_DUMPINDEX parameters to configure ioctl_indexes
+ 0003 - 2021-03-10 -	Added WRITE_REPEATCOUNT and WRITE_REPEATDELAY to handle tricky write situations
 ============================================================================
 */
 
@@ -36,20 +37,22 @@ module hiscore
 	parameter CFG_ADDRESSWIDTH=4,							// Max size of RAM address for highscore.dat entries (default 4 = 16 entries max)
 	parameter CFG_LENGTHWIDTH=1,							// Max size of length for each highscore.dat entries (default 1 byte = 255)
 	parameter DELAY_CHECKWAIT=6'b111111,				// Delay between start/end check attempts
-	parameter DELAY_CHECKHOLD=3'b111						// Hold time for start/end check reads (allows mux to settle)
+	parameter DELAY_CHECKHOLD=3'b111,				// Hold time for start/end check reads (allows mux to settle)
+	parameter WRITE_REPEATCOUNT=8'b1,					// Number of times to write score to game RAM
+	parameter WRITE_REPEATDELAY=31'b1111				// Delay between subsequent write attempts to game RAM
 )
 (
 	input										clk,
 	input										reset,
-	input	[31:0]							delay,			// Custom initial delay before highscore load begins
+	input		[31:0]						delay,			// Custom initial delay before highscore load begins
 	
 	input										ioctl_upload,
 	input										ioctl_download,
 	input										ioctl_wr,
-	input	[24:0]							ioctl_addr,
-	input	[7:0]								ioctl_dout,
-	input	[7:0]								ioctl_din,
-	input	[7:0]								ioctl_index,
+	input		[24:0]						ioctl_addr,
+	input		[7:0]							ioctl_dout,
+	input		[7:0]							ioctl_din,
+	input		[7:0]							ioctl_index,
 	
 	output	[HS_ADDRESSWIDTH-1:0]	ram_address,	// Address in game RAM to read/write score data
 	output	[7:0]							data_to_ram,	// Data to write to game RAM
@@ -117,6 +120,7 @@ reg										ram_read = 1'b0;			// Is RAM actively being read
 reg	[CFG_ADDRESSWIDTH-1:0]		counter = 1'b0;			// Index for current config table entry
 reg	[CFG_ADDRESSWIDTH-1:0]		total_entries=1'b0;		// Total count of config table entries
 reg										reset_last = 1'b0;		// Last cycle reset
+reg	[7:0]								write_counter = 1'b0;	// Index of current game RAM write attempt
 
 reg	[7:0]								last_ioctl_index;			// Last cycle HPS IO index
 reg										last_ioctl_download=0;	// Last cycle HPS IO download
@@ -355,6 +359,7 @@ begin
 								// If this was the last entry then move to phase II, copying scores into game ram
 								state <= 4'b1001;
 								counter <= 1'b0;
+								write_counter <= 1'b0;
 								ram_write <= 1'b0;
 								ram_read <= 1'b0;
 								ram_addr <= {1'b0, addr_base};
@@ -398,7 +403,9 @@ begin
 							end
 							else
 							begin
+								// Move to next entry
 								counter <= counter + 1'b1;
+								write_counter <= 1'b0;
 								base_io_addr <= local_addr + 1'b1;
 								state <= 4'b1001;
 							end
@@ -413,10 +420,19 @@ begin
 				4'b1000: // Hiscore write to RAM completed
 					begin
 						ram_write <= 1'b0;
+						if(write_counter < WRITE_REPEATCOUNT)
+						begin
+							// Schedule next write
+							state <= 4'b1111;
+							next_state <= 4'b1001;
+							local_addr <= 0;
+							wait_timer <= WRITE_REPEATDELAY;
+						end
 					end
 
 				4'b1001:  // counter is correct, next state the output of our local ram will be correct
 					begin
+						write_counter <= write_counter + 1'b1;
 						state <= 4'b1010;
 					end
 
