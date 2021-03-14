@@ -67,7 +67,7 @@ hiscore #(
 
 Add code to link the high score signals into the relevant RAM instances.  
 
-In simple cases (see [Phoenix](https://github.com/MiSTer-devel/Arcade_Phoenix-MiSTer) core for an example) this will only involve converting a working RAM instance from single to dual port.  
+In simple cases (see [Phoenix](https://github.com/MiSTer-devel/Arcade-Phoenix_MiSTer) core for an example) this will only involve converting a working RAM instance from single to dual port.  
 
 If hiscores are located in multiple RAM areas then some multiplexing will be needed to merge/split based on hs_address.  
 
