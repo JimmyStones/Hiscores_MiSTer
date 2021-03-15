@@ -44,7 +44,6 @@ hiscore #(
 	.CFG_LENGTHWIDTH(2),
 	.DELAY_CHECKWAIT(6'b111111),
 	.DELAY_CHECKHOLD(1'b0)
-)
 ) hi (
 	.clk(clk_sys),
 	.reset(reset),
