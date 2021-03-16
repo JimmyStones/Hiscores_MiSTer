@@ -26,6 +26,7 @@
  0002 - 2021-03-06 -	Added HS_DUMPFORMAT localparam to identify dump version (for future use)
 							Add HS_CONFIGINDEX and HS_DUMPINDEX parameters to configure ioctl_indexes
  0003 - 2021-03-10 -	Added WRITE_REPEATCOUNT and WRITE_REPEATDELAY to handle tricky write situations
+ 0004 - 2021-03-15 -	Fix ram_access assignment
 ============================================================================
 */
 
@@ -104,6 +105,7 @@ reg	[3:0]		initialised;
 assign downloading_config = ioctl_download && (ioctl_index==HS_CONFIGINDEX);
 assign downloading_dump = ioctl_download && (ioctl_index==HS_DUMPINDEX);
 assign uploading_dump = ioctl_upload && (ioctl_index==HS_DUMPINDEX);
+assign ram_access = uploading_dump | ram_write | ram_read;
 
 // Delay constants
 reg	[31:0] delay_default = 24'hFFFF;							// Default initial delay before highscore load begins (overridden by delay from module inputs if supplied)
@@ -261,9 +263,6 @@ begin
 		end
 		reset_last <= reset;
 
-		// activate access signal when necessary
-		ram_access <= uploading_dump | ram_write | ram_read;
-		
 		// Upload scores to HPS
 		if (uploading_dump == 1'b1)
 		begin
