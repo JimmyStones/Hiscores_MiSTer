@@ -6,26 +6,31 @@ Created by Alan Steremberg ([alanswx](https://github.com/alanswx))
 
 Further development by Jim Gregory ([JimmyStones](https://github.com/jimmystones))
 
-## Features
+### Features
 - Reads hiscore.dat entries from MRA (defaults to ioctl index = 3)
 - Loads and saves high score data in \<MRA name\>.nvm dump (defaults to ioctl index = 4)
 - Configurable delay before high score load to game RAM 
-- Configurable delay between hiscore entry start/end checks
-- Configurable delay during hiscore RAM read/write
+- Configurable hold time during hiscore RAM read/write
 - Configurable single or double byte entry lengths
 - Pause signal to halt CPU for during multiplex with cores already using dual-port RAM
 
-## History
-### 0001 - 2021-03-06
+### History
+#### 0001 - 2021-03-06
 - First marked release
-### 0002 - 2021-03-06
+#### 0002 - 2021-03-06
 - Added HS_DUMPFORMAT localparam to identify dump version (for future use).
 - Add HS_CONFIGINDEX and HS_DUMPINDEX parameters to configure ioctl_indexes
+#### 0003 - 2021-03-10
+- Added WRITE_REPEATCOUNT and WRITE_REPEATDELAY to handle tricky write situations
+#### 0004 - 2021-03-15
+- Fix ram_access assignment
+#### 0005 - 2021-03-18
+- Add configurable score table width, clean up some stupid mistakes
 
 ## Implementation instructions
 
 - Add hiscore.sv to ```rtl/``` folder and files.qip
-- Add the following code to the main core .sv file. 
+- Add the following code to the main core .sv file.
 
 ```verilog
 // HISCORE SYSTEM
@@ -38,12 +43,7 @@ wire hs_access;
 
 hiscore #(
 	.HS_ADDRESSWIDTH(16),
-	.HS_CONFIGINDEX(3),
-	.HS_DUMPINDEX(4),
-	.CFG_ADDRESSWIDTH(4),
-	.CFG_LENGTHWIDTH(2),
-	.DELAY_CHECKWAIT(6'b111111),
-	.DELAY_CHECKHOLD(1'b0)
+	.CFG_ADDRESSWIDTH(4)
 ) hi (
 	.clk(clk_sys),
 	.reset(reset),
@@ -61,8 +61,13 @@ hiscore #(
 	.ram_access(hs_access)
 );
 ```
+ The module parameters in the example above are the bare minimum config required to customise behaviour for a core.  See [Module parameters](#Module-parameters) for further details.
+
 
 ### Core specific implementation
+
+
+> **_NOTE:_** It is advisable to implement a working pause system beforehand so the hs_access can be used to pause the core while reading/writing to game RAM to avoid instability/corruption.
 
 Add code to link the high score signals into the relevant RAM instances.  
 
@@ -70,18 +75,20 @@ In simple cases (see [Phoenix](https://github.com/MiSTer-devel/Arcade-Phoenix_Mi
 
 If hiscores are located in multiple RAM areas then some multiplexing will be needed to merge/split based on hs_address.  
 
-If RAM is already dual-ported then the access signal can be used to pause CPU and switch inputs to one of the ports during highscore access (see [Sega System 1](https://github.com/MiSTer-devel/Arcade_SEGASYS1-MiSTer) for a particularly complex example!)
+If RAM is already dual-ported then the access signal should be used to pause CPU and switch inputs to one of the ports during highscore access (see [Sega System 1](https://github.com/MiSTer-devel/Arcade_SEGASYS1-MiSTer) for a particularly complex example!)
 
 ### Module parameters
 | Parameter | Description 
 | ----------| -----------
 | HS_ADDRESSWIDTH | Set to the widest memory address used by the core.  The upper size of hs_address should should be set to the same -1.
+| HS_SCOREWIDTH | Set to allow the size of the largest .nvm dump for this core  (default is 8, allowing 256 bytes)
 | HS_CONFIGINDEX | Optional override of ioctl_index used for config download (default is 3)
 | HS_DUMPINDEX | Optional override of ioctl_index used for nvram dump download (default is 4)
 | CFG_ADDRESSWIDTH | Set to allow for the maximum number of hiscore.dat entry lines used by the core (e.g. 4 = 16 max)
 | CFG_LENGTHWIDTH | Set to 1 for single byte length, 2 for double
-| DELAY_CHECKWAIT | Number of cycles to wait between start/end checks (use in conjunction with pause to avoid locking up cpu)
-| DELAY_CHECKHOLD | Number of cycles to wait during start/end checks (use to allow multiplexers to settle)
+| DELAY_CHECKWAIT | Number of cycles to wait between start/end checks (defaults to 256 cycles)
+| DELAY_CHECKHOLD | Number of cycles to wait during start/end checks to allow addresses/multiplexers to settle (defaults to 2 cycles)
+| DELAY_WRITEHOLD | Number of cycles to wait during write to game RAM to allow addresses/multiplexers to settle (defaults to 2 cycles)
 | WRITE_REPEATCOUNT | Number of times to write score to game RAM - used to brute force cores that don't behave (defaults to 1)
 | WRITE_REPEATDELAY | Number of cycles delay between subsequent write attempts
 
@@ -101,7 +108,7 @@ If RAM is already dual-ported then the access signal can be used to pause CPU an
 | ram_address    | out       | System RAM address for highscore read/write
 | data_to_ram    | out       | Data to write to system RAM
 | ram_write      | out       | Active-high signal to write to system RAM
-| ram_access     | out       | Active-high signal used to pause CPU for complex RAM situations
+| ram_access     | out       | Active-high signal used to pause CPU
 
 ### MRA data
 
