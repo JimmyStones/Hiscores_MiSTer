@@ -27,19 +27,22 @@
 							Add HS_CONFIGINDEX and HS_DUMPINDEX parameters to configure ioctl_indexes
  0003 - 2021-03-10 -	Added WRITE_REPEATCOUNT and WRITE_REPEATDELAY to handle tricky write situations
  0004 - 2021-03-15 -	Fix ram_access assignment
+ 0005 - 2021-03-18 -	Add configurable score table width, clean up some stupid mistakes
 ============================================================================
 */
 
 module hiscore 
 #(
 	parameter HS_ADDRESSWIDTH=10,							// Max size of game RAM address for highscores
+	parameter HS_SCOREWIDTH=8,								// Max size of capture RAM For highscore data (default 8 = 256 bytes max)
 	parameter HS_CONFIGINDEX=3,							// ioctl_index for config transfer
 	parameter HS_DUMPINDEX=4,								// ioctl_index for dump transfer
 	parameter CFG_ADDRESSWIDTH=4,							// Max size of RAM address for highscore.dat entries (default 4 = 16 entries max)
-	parameter CFG_LENGTHWIDTH=1,							// Max size of length for each highscore.dat entries (default 1 byte = 255)
-	parameter DELAY_CHECKWAIT=6'b111111,				// Delay between start/end check attempts
-	parameter DELAY_CHECKHOLD=3'b111,				// Hold time for start/end check reads (allows mux to settle)
-	parameter WRITE_REPEATCOUNT=8'b1,					// Number of times to write score to game RAM
+	parameter CFG_LENGTHWIDTH=1,							// Max size of length for each highscore.dat entries (default 1 = 256 bytes max)
+	parameter DELAY_CHECKWAIT=8'hFF	,					// Delay between start/end check attempts
+	parameter DELAY_CHECKHOLD=2'd2,						// Hold time for start/end check reads
+	parameter DELAY_WRITEHOLD=2'd2,						// Hold time for game RAM writes 
+	parameter WRITE_REPEATCOUNT=8'd2,					// Number of times to write score to game RAM
 	parameter WRITE_REPEATDELAY=31'b1111				// Delay between subsequent write attempts to game RAM
 )
 (
@@ -101,23 +104,22 @@ reg				downloaded_config = 1'b0;
 reg				downloaded_dump = 1'b0;
 reg				uploaded_dump = 1'b0;
 reg	[3:0]		initialised;
+reg				writing_scores = 1'b0;
+reg				checking_scores = 1'b0;
 
 assign downloading_config = ioctl_download && (ioctl_index==HS_CONFIGINDEX);
 assign downloading_dump = ioctl_download && (ioctl_index==HS_DUMPINDEX);
 assign uploading_dump = ioctl_upload && (ioctl_index==HS_DUMPINDEX);
-assign ram_access = uploading_dump | ram_write | ram_read;
+assign ram_access = uploading_dump | writing_scores | checking_scores;
 
 // Delay constants
-reg	[31:0] delay_default = 24'hFFFF;							// Default initial delay before highscore load begins (overridden by delay from module inputs if supplied)
-reg	[31:0] read_defaultwait = DELAY_CHECKWAIT;			// Delay between start/end check attempts
-reg	[31:0] read_defaultcheck = DELAY_CHECKHOLD;			// Duration of start/end check attempt (>1 loop to allow pause/mux based access to settle)
+reg	[31:0] delay_default = 1'b0;								// Default initial delay before highscore load begins (overridden by delay from module inputs if supplied)
 
 assign ram_address = ram_addr[HS_ADDRESSWIDTH-1:0];
 
 reg	[3:0]								state = 4'b0000;			// Current state machine index
 reg	[3:0]								next_state = 4'b0000;	// Next state machine index to move to after wait timer expires
 reg	[31:0]							wait_timer;					// Wait timer for inital/read/write delays
-reg										ram_read = 1'b0;			// Is RAM actively being read
 
 reg	[CFG_ADDRESSWIDTH-1:0]		counter = 1'b0;			// Index for current config table entry
 reg	[CFG_ADDRESSWIDTH-1:0]		total_entries=1'b0;		// Total count of config table entries
@@ -132,8 +134,8 @@ reg	[24:0]							ram_addr;					// Target RAM address for hiscore read/write
 reg	[24:0]							old_io_addr;
 reg	[24:0]							base_io_addr;
 wire	[23:0]							addr_base;
-reg	[24:0]							end_addr;
-reg	[24:0]							local_addr;
+wire	[24:0]							end_addr = (addr_base + length - 1'b1); // Generate last address of entry for end check 
+reg	[HS_SCOREWIDTH-1:0]			local_addr;
 wire	[(CFG_LENGTHWIDTH*8)-1:0]	length;
 wire	[7:0]								start_val;
 wire	[7:0]								end_val;
@@ -193,13 +195,13 @@ enddata_table(
 );
 
 // RAM chunk used to store hiscore data
-dpram_hs #(.aWidth(8),.dWidth(8))
+dpram_hs #(.aWidth(HS_SCOREWIDTH),.dWidth(8))
 hiscoredata (
 	.clk(clk),
-	.addr_a(ioctl_addr[7:0]),
+	.addr_a(ioctl_addr[(HS_SCOREWIDTH-1):0]),
 	.we_a(downloading_dump),
 	.d_a(ioctl_dout),
-	.addr_b(local_addr[7:0]),
+	.addr_b(local_addr),
 	.we_b(ioctl_upload), 
 	.d_b(ioctl_din),
 	.q_b(data_to_ram)
@@ -247,9 +249,6 @@ begin
 	last_ioctl_upload <= ioctl_upload;
 	last_ioctl_index <= ioctl_index;
 
-	// Generate last address of entry to check end value
-	end_addr <= addr_base + length - 1'b1;
-
 	if(downloaded_config)
 	begin
 		// Check for end of state machine reset to initialise state machine
@@ -268,7 +267,7 @@ begin
 		begin
 			// generate addresses to read high score from game memory. Base addresses off ioctl_address
 			if (ioctl_addr == 25'b0) begin
-				local_addr <= 25'b0;
+				local_addr <= 0;
 				base_io_addr <= 25'b0;
 				counter <= 1'b0000;
 			end
@@ -281,32 +280,33 @@ begin
 			// Set game ram address for reading back to HPS
 			ram_addr <= addr_base + (ioctl_addr - base_io_addr);
 			// Set local addresses to update cached dump in case of reset
-			local_addr <= ioctl_addr;
+			local_addr <= ioctl_addr[HS_SCOREWIDTH-1:0];
 		end
 		
 		if (ioctl_upload == 1'b0 && downloaded_dump == 1'b1 && reset == 1'b0)
 		begin
 			// State machine to write data to game RAM
 			case (state)
-				4'b0000: // Initialise state machine
+				4'b0000: // Start state machine
 				begin
 					// Setup base addresses
-					local_addr <= 25'b0;
+					local_addr <= 0;
 					base_io_addr <= 25'b0;
-					// Set address for start check
-					ram_read <= 1'b0;
-					// Set wait timer
+					// Reset entry counter and states
+					counter <= 0;
+					writing_scores <= 1'b0;
+					checking_scores <= 1'b0;
+					// Set wait timer for first start/end check run
 					next_state <= 4'b0001;
 					state <= 4'b1111;
-					wait_timer <= read_defaultwait;
 				end
 
-				4'b0001: // Set start check address, enable ram read and move to start check state
+				4'b0001: // Start start/end check run
 				begin
+					checking_scores <= 1'b1;
 					ram_addr <= {1'b0, addr_base};
-					ram_read <= 1'b1;
 					state <= 4'b0010;
-					wait_timer <= read_defaultcheck;
+					wait_timer <= DELAY_CHECKHOLD;
 				end
 
 				4'b0010: // Start check
@@ -314,76 +314,63 @@ begin
 						// Check for matching start value
 						if(ioctl_din == start_val)
 						begin
-						// - If match then stop ram_read and reset timer for end check
-							ram_read <= 1'b0;
-							next_state <= 4'b0011;
-							state <= 4'b1111;
-							wait_timer <= read_defaultwait;
+							// Prepare end check
+							ram_addr <= end_addr;
+							state <= 4'b0100;
+							wait_timer <= DELAY_CHECKHOLD;
 						end
 						else
 						begin
+							ram_addr <= {1'b0, addr_base};
 							if (wait_timer > 1'b0)
 							begin
 								wait_timer <= wait_timer - 1'b1;
 							end
 							else
 							begin
-								// - If no match after read wait then stop ram_read and retry
-								next_state <= 4'b0001;
-								state <= 4'b1111;
-								ram_read <= 1'b0;
-								wait_timer <= read_defaultwait;
+								// - If no match after read wait then stop check run and reset state machine
+								state <= 4'b0000;
+								checking_scores <= 1'b0;
+								wait_timer <= DELAY_CHECKWAIT;
 							end
 						end
 					end
 
-				4'b0011: // Set end check address, enable ram read and move to end check state
-				begin
-					ram_addr <= end_addr;
-					ram_read <= 1'b1;
-					state <= 4'b0100;
-					wait_timer <= read_defaultcheck;
-				end
-					
-					
 				4'b0100: // End check
 					begin
 						// Check for matching end value
-						// - If match then move to next state
-						// - If no match then go back to previous state
 						if (ioctl_din == end_val)
 						begin
 							if (counter == total_entries)
 							begin
 								// If this was the last entry then move to phase II, copying scores into game ram
+								checking_scores <= 1'b0;
 								state <= 4'b1001;
 								counter <= 1'b0;
 								write_counter <= 1'b0;
 								ram_write <= 1'b0;
-								ram_read <= 1'b0;
 								ram_addr <= {1'b0, addr_base};
 							end
 							else
 							begin
 								// Increment counter and restart state machine to check next entry
 								counter <= counter + 1'b1;
-								ram_read <= 1'b0;
-								state <= 4'b0000;
+								state <= 4'b0001;
 							end
 						end
 						else
 						begin
+							ram_addr <= end_addr;
 							if (wait_timer > 1'b0)
 							begin
 								wait_timer <= wait_timer - 1'b1;
 							end
 							else
 							begin
-								// - If no match after read wait then stop ram_read and retry
-								next_state <= 4'b0011;
-								state <= 4'b1111;
-								ram_read <= 1'b0;
-								wait_timer <= read_defaultwait;
+								// - If no match after read wait then stop check run and reset state machine
+								state <= 4'b0000;
+								checking_scores <= 1'b0;
+								wait_timer <= DELAY_CHECKWAIT;
 							end
 						end
 					end
@@ -419,6 +406,7 @@ begin
 				4'b1000: // Hiscore write to RAM completed
 					begin
 						ram_write <= 1'b0;
+						writing_scores <= 1'b0;
 						if(write_counter < WRITE_REPEATCOUNT)
 						begin
 							// Schedule next write
@@ -429,8 +417,9 @@ begin
 						end
 					end
 
-				4'b1001:  // counter is correct, next state the output of our local ram will be correct
+				4'b1001:  // Writing scores to game RAM begins
 					begin
+						writing_scores <= 1'b1; // indicate that writing has begun, will hold pause until write is complete if hooked up in core
 						write_counter <= write_counter + 1'b1;
 						state <= 4'b1010;
 					end
@@ -440,11 +429,19 @@ begin
 						state <= 4'b1110;
 						ram_addr <= addr_base + (local_addr - base_io_addr);
 						ram_write <= 1'b1;
+						wait_timer <= DELAY_WRITEHOLD;
 					end
 					
-				4'b1110: // hold write for cycle
+				4'b1110: // hold write for wait_timer
 					begin
-						state <= 4'b0110;
+						if (wait_timer > 1'b0)
+						begin
+							wait_timer <= wait_timer - 1'b1;
+						end
+						else
+						begin
+							state <= 4'b0110;
+						end
 					end
 					
 				4'b1111: // timer wait state
