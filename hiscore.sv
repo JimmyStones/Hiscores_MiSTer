@@ -42,7 +42,7 @@ module hiscore
 	parameter DELAY_CHECKWAIT=8'hFF	,					// Delay between start/end check attempts
 	parameter DELAY_CHECKHOLD=2'd2,						// Hold time for start/end check reads
 	parameter DELAY_WRITEHOLD=2'd2,						// Hold time for game RAM writes 
-	parameter WRITE_REPEATCOUNT=8'd2,					// Number of times to write score to game RAM
+	parameter WRITE_REPEATCOUNT=8'b1,					// Number of times to write score to game RAM
 	parameter WRITE_REPEATDELAY=31'b1111				// Delay between subsequent write attempts to game RAM
 )
 (
@@ -288,7 +288,7 @@ begin
 			// State machine to write data to game RAM
 			case (state)
 				4'b0000: // Start state machine
-				begin
+					begin
 					// Setup base addresses
 					local_addr <= 0;
 					base_io_addr <= 25'b0;
@@ -296,23 +296,21 @@ begin
 					counter <= 0;
 					writing_scores <= 1'b0;
 					checking_scores <= 1'b0;
-					// Set wait timer for first start/end check run
-					next_state <= 4'b0001;
-					state <= 4'b1111;
-				end
+					state <= 4'b0001;
+					end
 
 				4'b0001: // Start start/end check run
-				begin
+					begin
 					checking_scores <= 1'b1;
 					ram_addr <= {1'b0, addr_base};
 					state <= 4'b0010;
 					wait_timer <= DELAY_CHECKHOLD;
-				end
+					end
 
 				4'b0010: // Start check
 					begin
 						// Check for matching start value
-						if(ioctl_din == start_val)
+						if(wait_timer != DELAY_CHECKHOLD & ioctl_din == start_val)
 						begin
 							// Prepare end check
 							ram_addr <= end_addr;
@@ -328,8 +326,9 @@ begin
 							end
 							else
 							begin
-								// - If no match after read wait then stop check run and reset state machine
-								state <= 4'b0000;
+								// - If no match after read wait then stop check run and schedule restart of state machine
+								next_state <= 4'b0000;
+								state <= 4'b1111;
 								checking_scores <= 1'b0;
 								wait_timer <= DELAY_CHECKWAIT;
 							end
@@ -339,7 +338,7 @@ begin
 				4'b0100: // End check
 					begin
 						// Check for matching end value
-						if (ioctl_din == end_val)
+						if (wait_timer != DELAY_CHECKHOLD & ioctl_din == end_val)
 						begin
 							if (counter == total_entries)
 							begin
