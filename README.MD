@@ -26,6 +26,8 @@ Further development by Jim Gregory ([JimmyStones](https://github.com/jimmystones
 - Fix ram_access assignment
 #### 0005 - 2021-03-18
 - Add configurable score table width, clean up some stupid mistakes
+#### 0006 - 2021-03-27
+- Move 'tweakable' parameters into MRA data header
 
 ## Implementation instructions
 
@@ -47,7 +49,6 @@ hiscore #(
 ) hi (
 	.clk(clk_sys),
 	.reset(reset),
-	.delay(1'b0),
 	.ioctl_upload(ioctl_upload),
 	.ioctl_download(ioctl_download),
 	.ioctl_wr(ioctl_wr),
@@ -78,6 +79,9 @@ If hiscores are located in multiple RAM areas then some multiplexing will be nee
 If RAM is already dual-ported then the access signal should be used to pause CPU and switch inputs to one of the ports during highscore access (see [Sega System 1](https://github.com/MiSTer-devel/Arcade_SEGASYS1-MiSTer) for a particularly complex example!)
 
 ### Module parameters
+
+Parameters should be configured to allow the high score system to cope with all games supported by the core.  Maximum dump size, maximum number of entries and largest individual entry length need to be collated for all MRAs before selecting values.
+
 | Parameter | Description 
 | ----------| -----------
 | HS_ADDRESSWIDTH | Set to the widest memory address used by the core.  The upper size of hs_address should should be set to the same -1.
@@ -86,18 +90,12 @@ If RAM is already dual-ported then the access signal should be used to pause CPU
 | HS_DUMPINDEX | Optional override of ioctl_index used for nvram dump download (default is 4)
 | CFG_ADDRESSWIDTH | Set to allow for the maximum number of hiscore.dat entry lines used by the core (e.g. 4 = 16 max)
 | CFG_LENGTHWIDTH | Set to 1 for single byte length, 2 for double
-| DELAY_CHECKWAIT | Number of cycles to wait between start/end checks (defaults to 256 cycles)
-| DELAY_CHECKHOLD | Number of cycles to wait during start/end checks to allow addresses/multiplexers to settle (defaults to 2 cycles)
-| DELAY_WRITEHOLD | Number of cycles to wait during write to game RAM to allow addresses/multiplexers to settle (defaults to 2 cycles)
-| WRITE_REPEATCOUNT | Number of times to write score to game RAM - used to brute force cores that don't behave (defaults to 1)
-| WRITE_REPEATDELAY | Number of cycles delay between subsequent write attempts
 
 ### Module ports
 | Port           | Direction | Description 
 | -------------- | --------- | ----------- 
 | clk            | in        | System clock.  Should match the HPS IO clock input 
 | reset          | in        | Active-high reset signal from core
-| delay          | in        | 32-bit value to override default delay before writing hiscores to RAM
 | ioctl_upload   | in        | From HPS module
 | ioctl_download | in        | From HPS module
 | ioctl_wr       | in        | From HPS module
@@ -118,6 +116,7 @@ To enable the high score module add the following sections to the MRA.
 ```xml
 <rom index="3" md5="none">
 	<part>
+		00 00 FF FF 00 FF 00 02 00 02 00 01 11 11 00 00
 		00 00 90 5F 01 30 30 00 
 		00 00 90 7F 01 30 30 00 
 		00 00 90 9F 01 30 30 00 
@@ -133,7 +132,22 @@ To enable the high score module add the following sections to the MRA.
 <nvram index="4" size="166"/>
 ```
 
-The ```<rom index="3">``` section contains data from the MAME hiscore.dat entries.  If CFG_LENGTHWIDTH=1 then the following structure is used:
+The ```<rom index="3">``` section contains a header section with runtime tweakable parameters, and the entries from the MAME hiscore.dat file.
+
+##### Header data
+| Size (bytes) | Parameter | Description 
+| --- | ---| ---
+4 | START_WAIT | Number of cycles before beginning check process (usually 0)
+2 | CHECK_WAIT | Number of cycles to wait between start/end checks (usually 256)
+2 | CHECK_HOLD | Number of cycles to wait during start/end checks to allow addresses/multiplexers to settle (usually 2)
+2 | WRITE_HOLD | Number of cycles to wait during write to game RAM to allow addresses/multiplexers to settle (usually 2)
+2 | WRITE_REPEATCOUNT | Number of times to write score to game RAM - used to brute force cores that don't behave (usually 1)
+2 | WRITE_REPEATWAIT | Number of cycles delay between subsequent write attempts (usually 16)
+2 | (padding/future use) |
+
+##### Entry data
+
+If CFG_LENGTHWIDTH=1 then the following structure is used:
 
 - 4 bytes		Address of ram entry (in core memory map)
 - 1 byte		Length of ram entry in bytes
