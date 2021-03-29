@@ -56,7 +56,7 @@ module hiscore
 	output	[HS_ADDRESSWIDTH-1:0]	ram_address,	// Address in game RAM to read/write score data
 	output	[7:0]							data_to_ram,	// Data to write to game RAM
 	output	reg							ram_write,		// Write to game RAM (active high)
-	output	reg							ram_access		// RAM read or write required (active high)
+	output									ram_access		// RAM read or write required (active high)
 );
 
 // Parameters read from config header
@@ -114,10 +114,10 @@ localparam HS_HEADERLENGTH		=4'b1111;	// Size of header chunk (default=16 bytes)
 // HS_DUMPFORMAT = 1 --> No header, just the extracted hiscore data
 
 // Hiscore config and dump status 
-reg				downloading_config;
-reg				parsing_header;
-reg				downloading_dump;
-reg				uploading_dump;
+wire				downloading_config;
+wire				parsing_header;
+wire				downloading_dump;
+wire				uploading_dump;
 reg				downloaded_config = 1'b0;
 reg				downloaded_dump = 1'b0;
 reg				uploaded_dump = 1'b0;
@@ -158,8 +158,8 @@ reg	[HS_SCOREWIDTH-1:0]			local_addr;
 wire	[7:0]								start_val;
 wire	[7:0]								end_val;
 
-reg [23:0]								address_data_in;
-reg [(CFG_LENGTHWIDTH*8)-1:0]		length_data_in;
+wire [23:0]								address_data_in;
+wire [(CFG_LENGTHWIDTH*8)-1:0]	length_data_in;
 
 assign address_data_in = {last_ioctl_dout2, last_ioctl_dout, ioctl_dout};
 assign length_data_in = (CFG_LENGTHWIDTH == 1'b1) ? ioctl_dout : {last_ioctl_dout, ioctl_dout};

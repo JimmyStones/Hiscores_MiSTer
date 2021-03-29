@@ -31,7 +31,7 @@ Further development by Jim Gregory ([JimmyStones](https://github.com/jimmystones
 
 ## Implementation instructions
 
-- Add hiscore.sv to ```rtl/``` folder and files.qip
+- Add hiscore.v to ```rtl/``` folder and files.qip
 - Add the following code to the main core .sv file.
 
 ```verilog
