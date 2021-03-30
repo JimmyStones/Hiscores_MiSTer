@@ -281,6 +281,7 @@ begin
 	if(downloaded_config)
 	begin
 		// Check for end of state machine reset to initialise state machine
+		reset_last <= reset;
 		if (reset_last == 1'b1 && reset == 1'b0)
 		begin
 			wait_timer <= START_WAIT;
@@ -289,197 +290,198 @@ begin
 			counter <= 1'b0;
 			initialised <= initialised + 1'b1;
 		end
-		reset_last <= reset;
-
-		// Upload scores to HPS
-		if (uploading_dump == 1'b1)
+		else
 		begin
-			// generate addresses to read high score from game memory. Base addresses off ioctl_address
-			if (ioctl_addr == 25'b0) begin
-				local_addr <= 0;
-				base_io_addr <= 25'b0;
-				counter <= 1'b0000;
-			end
-			// Move to next entry when last address is reached
-			if (old_io_addr!=ioctl_addr && ram_addr==end_addr[24:0])
+			// Upload scores to HPS
+			if (uploading_dump == 1'b1)
 			begin
-				counter <= counter + 1'b1;
-				base_io_addr <= ioctl_addr;
-			end
-			// Set game ram address for reading back to HPS
-			ram_addr <= addr_base + (ioctl_addr - base_io_addr);
-			// Set local addresses to update cached dump in case of reset
-			local_addr <= ioctl_addr[HS_SCOREWIDTH-1:0];
-		end
-		
-		if (ioctl_upload == 1'b0 && downloaded_dump == 1'b1 && reset == 1'b0)
-		begin
-			// State machine to write data to game RAM
-			case (state)
-				4'b0000: // Start state machine
-					begin
-					// Setup base addresses
+				// generate addresses to read high score from game memory. Base addresses off ioctl_address
+				if (ioctl_addr == 25'b0) begin
 					local_addr <= 0;
 					base_io_addr <= 25'b0;
-					// Reset entry counter and states
-					counter <= 0;
-					writing_scores <= 1'b0;
-					checking_scores <= 1'b0;
-					state <= 4'b0001;
-					end
-
-				4'b0001: // Start start/end check run
-					begin
-					checking_scores <= 1'b1;
-					ram_addr <= {1'b0, addr_base};
-					state <= 4'b0010;
-					wait_timer <= CHECK_HOLD;
-					end
-
-				4'b0010: // Start check
-					begin
-						// Check for matching start value
-						if(wait_timer != CHECK_HOLD & ioctl_din == start_val)
+					counter <= 1'b0000;
+				end
+				// Move to next entry when last address is reached
+				if (old_io_addr!=ioctl_addr && ram_addr==end_addr[24:0])
+				begin
+					counter <= counter + 1'b1;
+					base_io_addr <= ioctl_addr;
+				end
+				// Set game ram address for reading back to HPS
+				ram_addr <= addr_base + (ioctl_addr - base_io_addr);
+				// Set local addresses to update cached dump in case of reset
+				local_addr <= ioctl_addr[HS_SCOREWIDTH-1:0];
+			end
+			
+			if (ioctl_upload == 1'b0 && downloaded_dump == 1'b1 && reset == 1'b0)
+			begin
+				// State machine to write data to game RAM
+				case (state)
+					4'b0000: // Start state machine
 						begin
-							// Prepare end check
-							ram_addr <= end_addr;
-							state <= 4'b0100;
-							wait_timer <= CHECK_HOLD;
+						// Setup base addresses
+						local_addr <= 0;
+						base_io_addr <= 25'b0;
+						// Reset entry counter and states
+						counter <= 0;
+						writing_scores <= 1'b0;
+						checking_scores <= 1'b0;
+						state <= 4'b0001;
 						end
-						else
+
+					4'b0001: // Start start/end check run
 						begin
-							ram_addr <= {1'b0, addr_base};
-							if (wait_timer > 1'b0)
+						checking_scores <= 1'b1;
+						ram_addr <= {1'b0, addr_base};
+						state <= 4'b0010;
+						wait_timer <= CHECK_HOLD;
+						end
+
+					4'b0010: // Start check
+						begin
+							// Check for matching start value
+							if(wait_timer != CHECK_HOLD & ioctl_din == start_val)
 							begin
-								wait_timer <= wait_timer - 1'b1;
+								// Prepare end check
+								ram_addr <= end_addr;
+								state <= 4'b0100;
+								wait_timer <= CHECK_HOLD;
 							end
 							else
 							begin
-								// - If no match after read wait then stop check run and schedule restart of state machine
-								next_state <= 4'b0000;
-								state <= 4'b1111;
-								checking_scores <= 1'b0;
-								wait_timer <= CHECK_WAIT;
-							end
-						end
-					end
-
-				4'b0100: // End check
-					begin
-						// Check for matching end value
-						if (wait_timer != CHECK_HOLD & ioctl_din == end_val)
-						begin
-							if (counter == total_entries)
-							begin
-								// If this was the last entry then move to phase II, copying scores into game ram
-								checking_scores <= 1'b0;
-								state <= 4'b1001;
-								counter <= 1'b0;
-								write_counter <= 1'b0;
-								ram_write <= 1'b0;
 								ram_addr <= {1'b0, addr_base};
-							end
-							else
-							begin
-								// Increment counter and restart state machine to check next entry
-								counter <= counter + 1'b1;
-								state <= 4'b0001;
-							end
-						end
-						else
-						begin
-							ram_addr <= end_addr;
-							if (wait_timer > 1'b0)
-							begin
-								wait_timer <= wait_timer - 1'b1;
-							end
-							else
-							begin
-								// - If no match after read wait then stop check run and reset state machine
-								state <= 4'b0000;
-								checking_scores <= 1'b0;
-								wait_timer <= CHECK_WAIT;
+								if (wait_timer > 1'b0)
+								begin
+									wait_timer <= wait_timer - 1'b1;
+								end
+								else
+								begin
+									// - If no match after read wait then stop check run and schedule restart of state machine
+									next_state <= 4'b0000;
+									state <= 4'b1111;
+									checking_scores <= 1'b0;
+									wait_timer <= CHECK_WAIT;
+								end
 							end
 						end
-					end
 
-				//
-				//  this section walks through our temporary ram and copies into game ram
-				//  it needs to happen in chunks, because the game ram isn't necessarily consecutive
-				4'b0110:
-					begin
-						local_addr <= local_addr + 1'b1;
-						if (ram_addr == end_addr)
+					4'b0100: // End check
 						begin
-							if (counter == total_entries) 
-							begin 
-								state <= 4'b1000;
+							// Check for matching end value
+							if (wait_timer != CHECK_HOLD & ioctl_din == end_val)
+							begin
+								if (counter == total_entries)
+								begin
+									// If this was the last entry then move to phase II, copying scores into game ram
+									checking_scores <= 1'b0;
+									state <= 4'b1001;
+									counter <= 1'b0;
+									write_counter <= 1'b0;
+									ram_write <= 1'b0;
+									ram_addr <= {1'b0, addr_base};
+								end
+								else
+								begin
+									// Increment counter and restart state machine to check next entry
+									counter <= counter + 1'b1;
+									state <= 4'b0001;
+								end
 							end
 							else
 							begin
-								// Move to next entry
-								counter <= counter + 1'b1;
-								write_counter <= 1'b0;
-								base_io_addr <= local_addr + 1'b1;
-								state <= 4'b1001;
+								ram_addr <= end_addr;
+								if (wait_timer > 1'b0)
+								begin
+									wait_timer <= wait_timer - 1'b1;
+								end
+								else
+								begin
+									// - If no match after read wait then stop check run and reset state machine
+									state <= 4'b0000;
+									checking_scores <= 1'b0;
+									wait_timer <= CHECK_WAIT;
+								end
 							end
-						end 
-						else 
+						end
+
+					//
+					//  this section walks through our temporary ram and copies into game ram
+					//  it needs to happen in chunks, because the game ram isn't necessarily consecutive
+					4'b0110:
 						begin
+							local_addr <= local_addr + 1'b1;
+							if (ram_addr == end_addr)
+							begin
+								if (counter == total_entries) 
+								begin 
+									state <= 4'b1000;
+								end
+								else
+								begin
+									// Move to next entry
+									counter <= counter + 1'b1;
+									write_counter <= 1'b0;
+									base_io_addr <= local_addr + 1'b1;
+									state <= 4'b1001;
+								end
+							end 
+							else 
+							begin
+								state <= 4'b1010;
+							end
+							ram_write <= 1'b0;
+						end
+
+					4'b1000: // Hiscore write to RAM completed
+						begin
+							ram_write <= 1'b0;
+							writing_scores <= 1'b0;
+							if(write_counter < WRITE_REPEATCOUNT)
+							begin
+								// Schedule next write
+								state <= 4'b1111;
+								next_state <= 4'b1001;
+								local_addr <= 0;
+								wait_timer <= WRITE_REPEATWAIT;
+							end
+						end
+
+					4'b1001:  // Writing scores to game RAM begins
+						begin
+							writing_scores <= 1'b1; // indicate that writing has begun, will hold pause until write is complete if hooked up in core
+							write_counter <= write_counter + 1'b1;
 							state <= 4'b1010;
 						end
-						ram_write <= 1'b0;
-					end
 
-				4'b1000: // Hiscore write to RAM completed
-					begin
-						ram_write <= 1'b0;
-						writing_scores <= 1'b0;
-						if(write_counter < WRITE_REPEATCOUNT)
+					4'b1010: // local ram is correct
 						begin
-							// Schedule next write
-							state <= 4'b1111;
-							next_state <= 4'b1001;
-							local_addr <= 0;
-							wait_timer <= WRITE_REPEATWAIT;
+							state <= 4'b1110;
+							ram_addr <= addr_base + (local_addr - base_io_addr);
+							ram_write <= 1'b1;
+							wait_timer <= WRITE_HOLD;
 						end
-					end
-
-				4'b1001:  // Writing scores to game RAM begins
-					begin
-						writing_scores <= 1'b1; // indicate that writing has begun, will hold pause until write is complete if hooked up in core
-						write_counter <= write_counter + 1'b1;
-						state <= 4'b1010;
-					end
-
-				4'b1010: // local ram is correct
-					begin
-						state <= 4'b1110;
-						ram_addr <= addr_base + (local_addr - base_io_addr);
-						ram_write <= 1'b1;
-						wait_timer <= WRITE_HOLD;
-					end
-					
-				4'b1110: // hold write for wait_timer
-					begin
-						if (wait_timer > 1'b0)
+						
+					4'b1110: // hold write for wait_timer
 						begin
-							wait_timer <= wait_timer - 1'b1;
+							if (wait_timer > 1'b0)
+							begin
+								wait_timer <= wait_timer - 1'b1;
+							end
+							else
+							begin
+								state <= 4'b0110;
+							end
 						end
-						else
+						
+					4'b1111: // timer wait state
 						begin
-							state <= 4'b0110;
+							if (wait_timer > 1'b0)
+								wait_timer <= wait_timer - 1'b1;
+							else
+								state <= next_state;
 						end
-					end
-					
-				4'b1111: // timer wait state
-					begin
-						if (wait_timer > 1'b0)
-							wait_timer <= wait_timer - 1'b1;
-						else
-							state <= next_state;
-					end
-			endcase
+				endcase
+			end
 		end
 	end
 	old_io_addr<=ioctl_addr;
