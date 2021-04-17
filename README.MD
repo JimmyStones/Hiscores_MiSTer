@@ -12,6 +12,7 @@ Further development by Jim Gregory ([JimmyStones](https://github.com/jimmystones
 - Configurable delay before high score load to game RAM 
 - Configurable hold time during hiscore RAM read/write
 - Configurable single or double byte entry lengths
+- Configurable pause padding around game RAM access
 - Pause signal to halt CPU for during multiplex with cores already using dual-port RAM
 
 ### History
@@ -28,6 +29,9 @@ Further development by Jim Gregory ([JimmyStones](https://github.com/jimmystones
 - Add configurable score table width, clean up some stupid mistakes
 #### 0006 - 2021-03-27
 - Move 'tweakable' parameters into MRA data header
+#### 0007 - 2021-04-17
+ - Convert state machine to use constants
+ - Add new 'pause padding' states
 
 ## Implementation instructions
 
@@ -42,6 +46,7 @@ wire [15:0]hs_address;
 wire [7:0]hs_data_in;
 wire hs_write;
 wire hs_access;
+wire hs_pause;
 
 hiscore #(
 	.HS_ADDRESSWIDTH(16),
@@ -59,7 +64,8 @@ hiscore #(
 	.ram_address(hs_address),
 	.data_to_ram(hs_data_in),
 	.ram_write(hs_write),
-	.ram_access(hs_access)
+	.ram_access(hs_access),
+	.pause_cpu(hs_pause)
 );
 ```
  The module parameters in the example above are the bare minimum config required to customise behaviour for a core.  See [Module parameters](#Module-parameters) for further details.
@@ -106,7 +112,8 @@ Parameters should be configured to allow the high score system to cope with all 
 | ram_address    | out       | System RAM address for highscore read/write
 | data_to_ram    | out       | Data to write to system RAM
 | ram_write      | out       | Active-high signal to write to system RAM
-| ram_access     | out       | Active-high signal used to pause CPU
+| ram_access     | out       | Active-high signal used to enable RAM read/write access
+| pause_cpu      | out       | Active-high signal used to pause CPU
 
 ### MRA data
 
@@ -116,7 +123,7 @@ To enable the high score module add the following sections to the MRA.
 ```xml
 <rom index="3" md5="none">
 	<part>
-		00 00 FF FF 00 FF 00 02 00 02 00 01 11 11 00 00
+		00 00 FF FF 00 FF 00 02 00 02 00 01 00 FF 02 00
 		00 00 90 5F 01 30 30 00 
 		00 00 90 7F 01 30 30 00 
 		00 00 90 9F 01 30 30 00 
@@ -142,8 +149,9 @@ The ```<rom index="3">``` section contains a header section with runtime tweakab
 2 | CHECK_HOLD | Number of cycles to wait during start/end checks to allow addresses/multiplexers to settle (usually 2)
 2 | WRITE_HOLD | Number of cycles to wait during write to game RAM to allow addresses/multiplexers to settle (usually 2)
 2 | WRITE_REPEATCOUNT | Number of times to write score to game RAM - used to brute force cores that don't behave (usually 1)
-2 | WRITE_REPEATWAIT | Number of cycles delay between subsequent write attempts (usually 16)
-2 | (padding/future use) |
+2 | WRITE_REPEATWAIT | Number of cycles delay between subsequent write attempts
+1 | ACCESS_PAUSEPAD | Number of cycles to pause CPU before and after RAM access attempts (usually 0)
+1 | (padding/future use) |
 
 ##### Entry data
 

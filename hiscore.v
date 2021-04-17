@@ -29,6 +29,7 @@
  0004 - 2021-03-15 -	Fix ram_access assignment
  0005 - 2021-03-18 -	Add configurable score table width, clean up some stupid mistakes
  0006 - 2021-03-27 -	Move 'tweakable' parameters into MRA data header
+ 0007 - 2021-04-15 -	Improve state machine maintainability, add new 'pause padding' states
 ============================================================================
 */
 
@@ -56,16 +57,40 @@ module hiscore
 	output	[HS_ADDRESSWIDTH-1:0]	ram_address,	// Address in game RAM to read/write score data
 	output	[7:0]							data_to_ram,	// Data to write to game RAM
 	output	reg							ram_write,		// Write to game RAM (active high)
-	output									ram_access		// RAM read or write required (active high)
+	output									ram_access,		// RAM read or write required (active high)
+	output									pause_cpu		// Pause core CPU to prepare for/relax after RAM access
 );
 
 // Parameters read from config header
-reg [31:0]	START_WAIT			=1'b0;		// Delay before beginning check process
-reg [15:0]	CHECK_WAIT 			=8'hFF;		// Delay between start/end check attempts
-reg [15:0]	CHECK_HOLD			=8'd2;		// Hold time for start/end check reads
-reg [15:0]	WRITE_HOLD			=8'd2;		// Hold time for game RAM writes 
-reg [15:0]	WRITE_REPEATCOUNT	=8'b1;		// Number of times to write score to game RAM
-reg [15:0]	WRITE_REPEATWAIT	=8'b1111;	// Delay between subsequent write attempts to game RAM
+reg [31:0]	START_WAIT			=32'd0;		// Delay before beginning check process
+reg [15:0]	CHECK_WAIT 			=16'hFF;		// Delay between start/end check attempts
+reg [15:0]	CHECK_HOLD			=16'd2;		// Hold time for start/end check reads
+reg [15:0]	WRITE_HOLD			=16'd2;		// Hold time for game RAM writes 
+reg [15:0]	WRITE_REPEATCOUNT	=16'b1;		// Number of times to write score to game RAM
+reg [15:0]	WRITE_REPEATWAIT	=16'b1111;	// Delay between subsequent write attempts to game RAM
+reg [7:0]	ACCESS_PAUSEPAD		=8'd4;		// Cycles to wait with paused CPU before and after RAM access
+
+
+// State machine constants
+localparam SM_STATEWIDTH	 = 4;				// Width of state machine net
+
+localparam SM_INIT			 = 0;
+localparam SM_TIMER			 = 1;
+
+localparam SM_CHECKPREP		 = 2;
+localparam SM_CHECKBEGIN	 = 3;
+localparam SM_CHECKSTARTVAL = 4;
+localparam SM_CHECKENDVAL	 = 5;
+localparam SM_CHECKCANCEL	 = 6;
+
+localparam SM_WRITEPREP		 = 7;
+localparam SM_WRITEBEGIN	 = 8;
+localparam SM_WRITEREADY	 = 9;
+localparam SM_WRITEDONE		 = 10;
+localparam SM_WRITECOMPLETE = 11;
+localparam SM_WRITERETRY	 = 12;
+
+localparam SM_STOPPED		 = 13;
 
 /*
 Hiscore config data structure (version 1)
@@ -107,9 +132,9 @@ Hiscore config data structure (version 1)
 
 */
 
-localparam HS_VERSION			=6;			// Version identifier for module
+localparam HS_VERSION			=7;			// Version identifier for module
 localparam HS_DUMPFORMAT		=1;			// Version identifier for dump format
-localparam HS_HEADERLENGTH		=4'b1111;	// Size of header chunk (default=16 bytes)
+localparam HS_HEADERLENGTH		=16;			// Size of header chunk (default=16 bytes)
 
 // HS_DUMPFORMAT = 1 --> No header, just the extracted hiscore data
 
@@ -132,18 +157,18 @@ assign uploading_dump = ioctl_upload && (ioctl_index==HS_DUMPINDEX);
 assign ram_access = uploading_dump | writing_scores | checking_scores;
 assign ram_address = ram_addr[HS_ADDRESSWIDTH-1:0];
 
-reg	[3:0]								state = 4'b0000;			// Current state machine index
-reg	[3:0]								next_state = 4'b0000;	// Next state machine index to move to after wait timer expires
+reg	[(SM_STATEWIDTH-1):0]		state = SM_INIT;			// Current state machine index
+reg	[(SM_STATEWIDTH-1):0]		next_state = SM_INIT;	// Next state machine index to move to after wait timer expires
 reg	[31:0]							wait_timer;					// Wait timer for inital/read/write delays
 
 reg	[CFG_ADDRESSWIDTH-1:0]		counter = 1'b0;			// Index for current config table entry
-reg	[CFG_ADDRESSWIDTH-1:0]		total_entries=1'b0;		// Total count of config table entries
+reg	[CFG_ADDRESSWIDTH-1:0]		total_entries = 1'b0;	// Total count of config table entries
 reg										reset_last = 1'b0;		// Last cycle reset
 reg	[7:0]								write_counter = 1'b0;	// Index of current game RAM write attempt
 
 reg	[7:0]								last_ioctl_index;			// Last cycle HPS IO index
-reg										last_ioctl_download=0;	// Last cycle HPS IO download
-reg										last_ioctl_upload=0;		// Last cycle HPS IO upload
+reg										last_ioctl_download = 0;// Last cycle HPS IO download
+reg										last_ioctl_upload = 0;	// Last cycle HPS IO upload
 reg	[7:0]								last_ioctl_dout;			// Last cycle HPS IO data out
 reg	[7:0]								last_ioctl_dout2;			// Last cycle +1 HPS IO data out
 reg	[7:0]								last_ioctl_dout3;			// Last cycle +2 HPS IO data out
@@ -235,12 +260,16 @@ begin
 		// Get header chunk data
 		if(parsing_header)
 		begin
-			if(ioctl_wr & (header_chunk == 4'd3)) START_WAIT <= { last_ioctl_dout3, last_ioctl_dout2, last_ioctl_dout, ioctl_dout };
-			if(ioctl_wr & (header_chunk == 4'd5)) CHECK_WAIT <= { last_ioctl_dout, ioctl_dout };
-			if(ioctl_wr & (header_chunk == 4'd7)) CHECK_HOLD <= { last_ioctl_dout, ioctl_dout };
-			if(ioctl_wr & (header_chunk == 4'd9)) WRITE_HOLD <= { last_ioctl_dout, ioctl_dout };
-			if(ioctl_wr & (header_chunk == 4'd11)) WRITE_REPEATCOUNT <= { last_ioctl_dout, ioctl_dout };
-			if(ioctl_wr & (header_chunk == 4'd13)) WRITE_REPEATWAIT <= { last_ioctl_dout, ioctl_dout };
+			if(ioctl_wr)
+			begin
+				if(header_chunk == 4'd3) START_WAIT <= { last_ioctl_dout3, last_ioctl_dout2, last_ioctl_dout, ioctl_dout };
+				if(header_chunk == 4'd5) CHECK_WAIT <= { last_ioctl_dout, ioctl_dout };
+				if(header_chunk == 4'd7) CHECK_HOLD <= { last_ioctl_dout, ioctl_dout };
+				if(header_chunk == 4'd9) WRITE_HOLD <= { last_ioctl_dout, ioctl_dout };
+				if(header_chunk == 4'd11) WRITE_REPEATCOUNT <= { last_ioctl_dout, ioctl_dout };
+				if(header_chunk == 4'd13) WRITE_REPEATWAIT <= { last_ioctl_dout, ioctl_dout };
+				if(header_chunk == 4'd14) ACCESS_PAUSEPAD <= ioctl_dout;
+			end
 		end
 		else
 		begin
@@ -285,8 +314,8 @@ begin
 		if (reset_last == 1'b1 && reset == 1'b0)
 		begin
 			wait_timer <= START_WAIT;
-			next_state <= 4'b0000;
-			state <= 4'b1111;
+			next_state <= SM_INIT;
+			state <= SM_TIMER;
 			counter <= 1'b0;
 			initialised <= initialised + 1'b1;
 		end
@@ -317,34 +346,45 @@ begin
 			begin
 				// State machine to write data to game RAM
 				case (state)
-					4'b0000: // Start state machine
+					SM_INIT: // Start state machine
 						begin
-						// Setup base addresses
-						local_addr <= 0;
-						base_io_addr <= 25'b0;
-						// Reset entry counter and states
-						counter <= 0;
-						writing_scores <= 1'b0;
-						checking_scores <= 1'b0;
-						state <= 4'b0001;
+							// Setup base addresses
+							local_addr <= 0;
+							base_io_addr <= 25'b0;
+							// Reset entry counter and states
+							counter <= 0;
+							writing_scores <= 1'b0;
+							checking_scores <= 1'b0;
+							pause_cpu <= 1'b0;
+							state <= SM_CHECKPREP;
 						end
 
-					4'b0001: // Start start/end check run
+					// Start/end check states
+					// ----------------------
+					SM_CHECKPREP: // Prepare start/end check run - pause CPU in readiness for RAM access
 						begin
-						checking_scores <= 1'b1;
-						ram_addr <= {1'b0, addr_base};
-						state <= 4'b0010;
-						wait_timer <= CHECK_HOLD;
+							state <= SM_TIMER;
+							next_state <= SM_CHECKBEGIN;
+							pause_cpu <= 1'b1;
+							wait_timer <= ACCESS_PAUSEPAD;
 						end
 
-					4'b0010: // Start check
+					SM_CHECKBEGIN: // Begin start/end check run - enable RAM access
+						begin
+							checking_scores <= 1'b1;
+							ram_addr <= {1'b0, addr_base};
+							state <= SM_CHECKSTARTVAL;
+							wait_timer <= CHECK_HOLD;
+						end
+
+					SM_CHECKSTARTVAL: // Start check
 						begin
 							// Check for matching start value
 							if(wait_timer != CHECK_HOLD & ioctl_din == start_val)
 							begin
 								// Prepare end check
 								ram_addr <= end_addr;
-								state <= 4'b0100;
+								state <= SM_CHECKENDVAL;
 								wait_timer <= CHECK_HOLD;
 							end
 							else
@@ -357,24 +397,24 @@ begin
 								else
 								begin
 									// - If no match after read wait then stop check run and schedule restart of state machine
-									next_state <= 4'b0000;
-									state <= 4'b1111;
+									next_state <= SM_CHECKCANCEL;
+									state <= SM_TIMER;
 									checking_scores <= 1'b0;
-									wait_timer <= CHECK_WAIT;
+									wait_timer <= ACCESS_PAUSEPAD;
 								end
 							end
 						end
 
-					4'b0100: // End check
+					SM_CHECKENDVAL: // End check
 						begin
 							// Check for matching end value
 							if (wait_timer != CHECK_HOLD & ioctl_din == end_val)
 							begin
 								if (counter == total_entries)
 								begin
-									// If this was the last entry then move to phase II, copying scores into game ram
+									// If this was the last entry then move on to writing scores to game ram
 									checking_scores <= 1'b0;
-									state <= 4'b1001;
+									state <= SM_WRITEBEGIN;	// Bypass SM_WRITEPREP as we are already paused
 									counter <= 1'b0;
 									write_counter <= 1'b0;
 									ram_write <= 1'b0;
@@ -384,7 +424,7 @@ begin
 								begin
 									// Increment counter and restart state machine to check next entry
 									counter <= counter + 1'b1;
-									state <= 4'b0001;
+									state <= SM_CHECKBEGIN;
 								end
 							end
 							else
@@ -396,25 +436,58 @@ begin
 								end
 								else
 								begin
-									// - If no match after read wait then stop check run and reset state machine
-									state <= 4'b0000;
+									// - If no match after read wait then stop check run and schedule restart of state machine
+									next_state <= SM_CHECKCANCEL;
+									state <= SM_TIMER;
 									checking_scores <= 1'b0;
-									wait_timer <= CHECK_WAIT;
+									wait_timer <= ACCESS_PAUSEPAD;
 								end
 							end
 						end
 
-					//
-					//  this section walks through our temporary ram and copies into game ram
-					//  it needs to happen in chunks, because the game ram isn't necessarily consecutive
-					4'b0110:
+					SM_CHECKCANCEL: // Cancel start/end check run - disable RAM access and keep CPU paused 
 						begin
-							local_addr <= local_addr + 1'b1;
+							pause_cpu <= 1'b0;
+							next_state <= SM_INIT;
+							state <= SM_TIMER;
+							wait_timer <= CHECK_WAIT;
+						end
+
+					// Write to game RAM states
+					// ----------------------
+					SM_WRITEPREP: // Prepare to write scores - pause CPU in readiness for RAM access (only used on subsequent write attempts)
+						begin
+							state <= SM_TIMER;
+							next_state <= SM_WRITEBEGIN;
+							pause_cpu <= 1'b1;
+							wait_timer <= ACCESS_PAUSEPAD;
+						end
+
+					SM_WRITEBEGIN: // Writing scores to game RAM begins
+						begin
+							writing_scores <= 1'b1; // Enable muxes if necessary
+							write_counter <= write_counter + 1'b1;
+							state <= SM_WRITEREADY;
+						end
+
+					SM_WRITEREADY: // local ram should be correct, start write to game RAM
+						begin
+							ram_addr <= addr_base + (local_addr - base_io_addr);
+							state <= SM_TIMER;
+							next_state <= SM_WRITEDONE;
+							wait_timer <= WRITE_HOLD;
+							ram_write <= 1'b1;
+						end
+
+					SM_WRITEDONE:
+						begin
+							local_addr <= local_addr + 1'b1; // Increment to next byte of entry
 							if (ram_addr == end_addr)
 							begin
+								// End of entry reached
 								if (counter == total_entries) 
 								begin 
-									state <= 4'b1000;
+									state <= SM_WRITECOMPLETE;
 								end
 								else
 								begin
@@ -422,58 +495,49 @@ begin
 									counter <= counter + 1'b1;
 									write_counter <= 1'b0;
 									base_io_addr <= local_addr + 1'b1;
-									state <= 4'b1001;
+									state <= SM_WRITEBEGIN;
 								end
 							end 
 							else 
 							begin
-								state <= 4'b1010;
+								state <= SM_WRITEREADY;
 							end
 							ram_write <= 1'b0;
 						end
 
-					4'b1000: // Hiscore write to RAM completed
+					SM_WRITECOMPLETE: // Hiscore write to RAM completed
 						begin
 							ram_write <= 1'b0;
 							writing_scores <= 1'b0;
+							state <= SM_TIMER;
 							if(write_counter < WRITE_REPEATCOUNT)
 							begin
 								// Schedule next write
-								state <= 4'b1111;
-								next_state <= 4'b1001;
+								next_state <= SM_WRITERETRY;
 								local_addr <= 0;
 								wait_timer <= WRITE_REPEATWAIT;
 							end
-						end
-
-					4'b1001:  // Writing scores to game RAM begins
-						begin
-							writing_scores <= 1'b1; // indicate that writing has begun, will hold pause until write is complete if hooked up in core
-							write_counter <= write_counter + 1'b1;
-							state <= 4'b1010;
-						end
-
-					4'b1010: // local ram is correct
-						begin
-							state <= 4'b1110;
-							ram_addr <= addr_base + (local_addr - base_io_addr);
-							ram_write <= 1'b1;
-							wait_timer <= WRITE_HOLD;
-						end
-						
-					4'b1110: // hold write for wait_timer
-						begin
-							if (wait_timer > 1'b0)
-							begin
-								wait_timer <= wait_timer - 1'b1;
-							end
 							else
 							begin
-								state <= 4'b0110;
+								next_state <= SM_STOPPED;
+								wait_timer <= ACCESS_PAUSEPAD;
 							end
 						end
-						
-					4'b1111: // timer wait state
+
+					SM_WRITERETRY: // Stop pause and schedule next write
+						begin
+							pause_cpu <= 1'b0;
+							state <= SM_TIMER;
+							next_state <= SM_WRITEPREP;
+							wait_timer <= WRITE_REPEATWAIT;
+						end
+
+					SM_STOPPED:
+						begin
+							pause_cpu <= 1'b0;
+						end
+
+					SM_TIMER: // timer wait state
 						begin
 							if (wait_timer > 1'b0)
 								wait_timer <= wait_timer - 1'b1;
