@@ -58,7 +58,7 @@ module hiscore
 	output	[7:0]							data_to_ram,	// Data to write to game RAM
 	output	reg							ram_write,		// Write to game RAM (active high)
 	output									ram_access,		// RAM read or write required (active high)
-	output									pause_cpu		// Pause core CPU to prepare for/relax after RAM access
+	output	reg							pause_cpu		// Pause core CPU to prepare for/relax after RAM access
 );
 
 // Parameters read from config header
