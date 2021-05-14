@@ -32,6 +32,8 @@ Further development by Jim Gregory ([JimmyStones](https://github.com/jimmystones
 #### 0007 - 2021-04-17
  - Convert state machine to use constants
  - Add new 'pause padding' states
+#### 0008 - 2021-05-12
+ - Feed back core-level pause to halt startup timer
 
 ## Implementation instructions
 
@@ -52,15 +54,10 @@ hiscore #(
 	.HS_ADDRESSWIDTH(16),
 	.CFG_ADDRESSWIDTH(4)
 ) hi (
+	.*
 	.clk(clk_sys),
+	.paused(pause_cpu),
 	.reset(reset),
-	.ioctl_upload(ioctl_upload),
-	.ioctl_download(ioctl_download),
-	.ioctl_wr(ioctl_wr),
-	.ioctl_addr(ioctl_addr),
-	.ioctl_dout(ioctl_dout),
-	.ioctl_din(ioctl_din),
-	.ioctl_index(ioctl_index),
 	.ram_address(hs_address),
 	.data_to_ram(hs_data_in),
 	.ram_write(hs_write),
@@ -102,6 +99,7 @@ Parameters should be configured to allow the high score system to cope with all 
 | -------------- | --------- | ----------- 
 | clk            | in        | System clock.  Should match the HPS IO clock input 
 | reset          | in        | Active-high reset signal from core
+| paused         | in        | Signal from core confirming CPU is paused
 | ioctl_upload   | in        | From HPS module
 | ioctl_download | in        | From HPS module
 | ioctl_wr       | in        | From HPS module

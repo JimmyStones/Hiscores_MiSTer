@@ -30,6 +30,7 @@
  0005 - 2021-03-18 -	Add configurable score table width, clean up some stupid mistakes
  0006 - 2021-03-27 -	Move 'tweakable' parameters into MRA data header
  0007 - 2021-04-15 -	Improve state machine maintainability, add new 'pause padding' states
+ 0008 - 2021-05-12 -	Feed back core-level pause to halt startup timer
 ============================================================================
 */
 
@@ -44,6 +45,7 @@ module hiscore
 )
 (
 	input										clk,
+	input										paused,			// Signal from core confirming CPU is paused
 	input										reset,
 
 	input										ioctl_upload,
@@ -132,7 +134,7 @@ Hiscore config data structure (version 1)
 
 */
 
-localparam HS_VERSION			=7;			// Version identifier for module
+localparam HS_VERSION			=8;			// Version identifier for module
 localparam HS_DUMPFORMAT		=1;			// Version identifier for dump format
 localparam HS_HEADERLENGTH		=16;			// Size of header chunk (default=16 bytes)
 
@@ -539,10 +541,15 @@ begin
 
 					SM_TIMER: // timer wait state
 						begin
-							if (wait_timer > 1'b0)
-								wait_timer <= wait_timer - 1'b1;
-							else
-								state <= next_state;
+							// Do not progress timer if CPU is paused by source other than this module
+							// - Stops initial hiscore load delay being foiled by user pausing/entering OSD
+							if (paused == 1'b0 || pause_cpu == 1'b1)
+							begin
+								if (wait_timer > 1'b0)
+									wait_timer <= wait_timer - 1'b1;
+								else
+									state <= next_state;
+							end
 						end
 				endcase
 			end
