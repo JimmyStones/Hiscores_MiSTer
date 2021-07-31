@@ -14,6 +14,7 @@ Further development by Jim Gregory ([JimmyStones](https://github.com/jimmystones
 - Configurable single or double byte entry lengths
 - Configurable pause padding around game RAM access
 - Pause signal to halt CPU for during multiplex with cores already using dual-port RAM
+- Scores are extracted every time OSD is opened
 
 ### History
 #### 0001 - 2021-03-06
@@ -34,6 +35,8 @@ Further development by Jim Gregory ([JimmyStones](https://github.com/jimmystones
  - Add new 'pause padding' states
 #### 0008 - 2021-05-12
  - Feed back core-level pause to halt startup timer
+#### 0009 - 2021-07-31
+ -	Split hiscore extraction from upload (updates hiscore buffer on OSD open)
 
 ## Implementation instructions
 
@@ -45,9 +48,11 @@ Further development by Jim Gregory ([JimmyStones](https://github.com/jimmystones
 // --------------
 
 wire [15:0]hs_address;
+wire [7:0]hs_data_out;
 wire [7:0]hs_data_in;
-wire hs_write;
-wire hs_access;
+wire hs_write_enable;
+wire hs_access_read;
+wire hs_access_write;
 wire hs_pause;
 
 hiscore #(
@@ -59,9 +64,13 @@ hiscore #(
 	.paused(pause_cpu),
 	.reset(reset),
 	.ram_address(hs_address),
+	.data_from_ram(hs_data_out),
 	.data_to_ram(hs_data_in),
-	.ram_write(hs_write),
-	.ram_access(hs_access),
+	.data_from_hps(ioctl_dout),
+	.data_to_hps(ioctl_din),
+	.ram_write(hs_write_enable),
+	.ram_intent_read(hs_access_read),
+	.ram_intent_write(hs_access_write),
 	.pause_cpu(hs_pause)
 );
 ```
@@ -71,7 +80,7 @@ hiscore #(
 ### Core specific implementation
 
 
-> **_NOTE:_** It is advisable to implement a working pause system beforehand so the hs_access can be used to pause the core while reading/writing to game RAM to avoid instability/corruption.
+> **_NOTE:_** It is advisable to implement a working pause system beforehand so the pause_cpu signal can be used to pause the core while reading/writing to game RAM to avoid instability/corruption.
 
 Add code to link the high score signals into the relevant RAM instances.  
 
@@ -79,7 +88,7 @@ In simple cases (see [Phoenix](https://github.com/MiSTer-devel/Arcade-Phoenix_Mi
 
 If hiscores are located in multiple RAM areas then some multiplexing will be needed to merge/split based on hs_address.  
 
-If RAM is already dual-ported then the access signal should be used to pause CPU and switch inputs to one of the ports during highscore access (see [Sega System 1](https://github.com/MiSTer-devel/Arcade_SEGASYS1-MiSTer) for a particularly complex example!)
+If RAM is already dual-ported then the hs_access_read/hs_access_write signals should be used to pause CPU and switch inputs to one of the ports during highscore access (see [Sega System 1](https://github.com/MiSTer-devel/Arcade_SEGASYS1-MiSTer) for a particularly complex example!)
 
 ### Module parameters
 
@@ -95,23 +104,25 @@ Parameters should be configured to allow the high score system to cope with all 
 | CFG_LENGTHWIDTH | Set to 1 for single byte length, 2 for double
 
 ### Module ports
-| Port           | Direction | Description 
-| -------------- | --------- | ----------- 
-| clk            | in        | System clock.  Should match the HPS IO clock input 
-| reset          | in        | Active-high reset signal from core
-| paused         | in        | Signal from core confirming CPU is paused
-| ioctl_upload   | in        | From HPS module
-| ioctl_download | in        | From HPS module
-| ioctl_wr       | in        | From HPS module
-| ioctl_addr     | in        | From HPS module
-| ioctl_dout     | in        | From HPS module
-| ioctl_din      | in        | From HPS module
-| ioctl_index    | in        | From HPS module
-| ram_address    | out       | System RAM address for highscore read/write
-| data_to_ram    | out       | Data to write to system RAM
-| ram_write      | out       | Active-high signal to write to system RAM
-| ram_access     | out       | Active-high signal used to enable RAM read/write access
-| pause_cpu      | out       | Active-high signal used to pause CPU
+| Port             | Direction | Description 
+| ---------------- | --------- | ----------- 
+| clk              | in        | System clock.  Should match the HPS IO clock input 
+| reset            | in        | Active-high reset signal from core
+| paused           | in        | Signal from core confirming CPU is paused
+| ioctl_upload     | in        | From HPS module
+| ioctl_download   | in        | From HPS module
+| ioctl_wr         | in        | From HPS module
+| ioctl_addr       | in        | From HPS module
+| ioctl_index      | in        | From HPS module
+| ram_address      | out       | System RAM address for highscore read/write
+| data_to_ram      | out       | Data to send to system RAM (restore scores)
+| data_from_ram    | out       | Data from system RAM (extract scores)
+| data_to_hps      | out       | Data to send to HPS (save scores)
+| data_from_hps    | out       | Data from HPS (load scores)
+| ram_write        | out       | Active-high signal to write to system RAM
+| ram_intent_read  | out       | Active-high signal used to enable RAM read access
+| ram_intent_write | out       | Active-high signal used to enable RAM write access
+| pause_cpu        | out       | Active-high signal used to pause CPU
 
 ### MRA data
 
@@ -188,7 +199,9 @@ The size attribute in ```<nvram index="4" size="?">``` should be the **decimal**
 
 _Multiplexing_
 
-For cores which require multiplexing due to scores being split across multiple RAM banks, or where RAM is already dual-ported, the active-high **hs_access** signal is triggered while the high score module is reading or writing game RAM.
+To help support cores which require multiplexing due to scores being split across multiple RAM banks, or where RAM is already dual-ported, the followinG signals can be used:
+ - ram_intent_read - High when hiscore module wants to read from game RAM
+ - ram_intent_write - High when hiscore module wants to write to game RAM (ram_write needs to also be high to actually write to game RAM)
 
 _Calculating delays_
 
