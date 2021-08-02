@@ -326,7 +326,7 @@ begin
 	begin
 		// Check for end of core reset to initialise state machine
 		reset_last <= reset;
-		if (reset_last == 1'b1 && reset == 1'b0)
+		if (downloaded_dump == 1'b1 && reset_last == 1'b1 && reset == 1'b0)
 		begin
 			wait_timer <= START_WAIT;
 			next_state <= SM_INIT_RESTORE;
@@ -619,20 +619,20 @@ begin
 						begin
 							pause_cpu <= 1'b0;
 						end
-
-					SM_TIMER: // timer wait state
-						begin
-							// Do not progress timer if CPU is paused by source other than this module
-							// - Stops initial hiscore load delay being foiled by user pausing/entering OSD
-							if (paused == 1'b0 || pause_cpu == 1'b1)
-							begin
-								if (wait_timer > 1'b0)
-									wait_timer <= wait_timer - 1'b1;
-								else
-									state <= next_state;
-							end
-						end
 				endcase
+			end
+			
+			if(state == SM_TIMER) // timer wait state
+			begin
+				// Do not progress timer if CPU is paused by source other than this module
+				// - Stops initial hiscore load delay being foiled by user pausing/entering OSD
+				if (paused == 1'b0 || pause_cpu == 1'b1)
+				begin
+					if (wait_timer > 1'b0)
+						wait_timer <= wait_timer - 1'b1;
+					else
+						state <= next_state;
+				end
 			end
 		end
 	end
