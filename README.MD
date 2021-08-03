@@ -14,7 +14,7 @@ Further development by Jim Gregory ([JimmyStones](https://github.com/jimmystones
 - Configurable single or double byte entry lengths
 - Configurable pause padding around game RAM access
 - Pause signal to halt CPU for during multiplex with cores already using dual-port RAM
-- Scores are extracted every time OSD is opened
+- Scores are extracted every time OSD is opened into temporary buffer, copied to saveable data if changed (ready for autosave support)
 
 ### History
 #### 0001 - 2021-03-06
@@ -36,7 +36,9 @@ Further development by Jim Gregory ([JimmyStones](https://github.com/jimmystones
 #### 0008 - 2021-05-12
  - Feed back core-level pause to halt startup timer
 #### 0009 - 2021-07-31
- -	Split hiscore extraction from upload (updates hiscore buffer on OSD open)
+ - Split hiscore extraction from upload (updates hiscore buffer on OSD open)
+#### 0010 - 2021-08-03
+ - Add hiscore extraction buffer and change detection (ready for autosave!)
 
 ## Implementation instructions
 
