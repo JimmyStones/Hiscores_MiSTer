@@ -14,7 +14,7 @@ Further development by Jim Gregory ([JimmyStones](https://github.com/jimmystones
 - Configurable single or double byte entry lengths
 - Configurable pause padding around game RAM access
 - Pause signal to halt CPU for during multiplex with cores already using dual-port RAM
-- Scores are extracted every time OSD is opened into temporary buffer, copied to saveable data if changed (ready for autosave support)
+- Scores are extracted every time OSD is opened into temporary buffer, if changed then they are copied to saveable data and auto-save is triggered (optional)
 
 ### History
 #### 0001 - 2021-03-06
@@ -39,6 +39,8 @@ Further development by Jim Gregory ([JimmyStones](https://github.com/jimmystones
  - Split hiscore extraction from upload (updates hiscore buffer on OSD open)
 #### 0010 - 2021-08-03
  - Add hiscore extraction buffer and change detection (ready for autosave!)
+#### 0011 - 2021-08-07
+Optional auto-save on OSD open
 
 ## Implementation instructions
 
@@ -65,6 +67,7 @@ hiscore #(
 	.clk(clk_sys),
 	.paused(pause_cpu),
 	.reset(reset),
+	.autosave(~status[28]),
 	.ram_address(hs_address),
 	.data_from_ram(hs_data_out),
 	.data_to_ram(hs_data_in),
@@ -110,8 +113,10 @@ Parameters should be configured to allow the high score system to cope with all 
 | ---------------- | --------- | ----------- 
 | clk              | in        | System clock.  Should match the HPS IO clock input 
 | reset            | in        | Active-high reset signal from core
-| paused           | in        | Signal from core confirming CPU is paused
+| paused           | in        | Active-high signal from core confirming CPU is paused
+| autosave         | in        | Active-high flag to enable autosave
 | ioctl_upload     | in        | From HPS module
+| ioctl_upload_req | in        | From HPS module
 | ioctl_download   | in        | From HPS module
 | ioctl_wr         | in        | From HPS module
 | ioctl_addr       | in        | From HPS module

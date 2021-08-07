@@ -33,6 +33,7 @@
  0008 - 2021-05-12 -	Feed back core-level pause to halt startup timer
  0009 - 2021-07-31 -	Split hiscore extraction from upload (updates hiscore buffer on OSD open)
  0010 - 2021-08-03 -	Add hiscore buffer and change detection (ready for autosave!)
+ 0011 - 2021-08-07 -	Optional auto-save on OSD open
 ============================================================================
 */
 
@@ -49,8 +50,10 @@ module hiscore
 	input										clk,
 	input										paused,			// Signal from core confirming CPU is paused
 	input										reset,
+	input										autosave,		// Auto-save enabled (active high)
 
 	input										ioctl_upload,
+	output reg								ioctl_upload_req,
 	input										ioctl_download,
 	input										ioctl_wr,
 	input		[24:0]						ioctl_addr,
@@ -104,8 +107,9 @@ localparam SM_COMPAREDONE	 = 19;
 localparam SM_COMPARECOMPLETE	 = 20;
 
 localparam SM_EXTRACTINIT	 = 22;
-localparam SM_EXTRACT		 = 24;
-localparam SM_EXTRACTCOMPLETE	 = 26;
+localparam SM_EXTRACT		 = 23;
+localparam SM_EXTRACTSAVE	 = 24;
+localparam SM_EXTRACTCOMPLETE	 = 25;
 
 localparam SM_STOPPED		 = 30;
 
@@ -150,7 +154,7 @@ Hiscore config data structure (version 1)
 
 */
 
-localparam HS_VERSION			=8;			// Version identifier for module
+localparam HS_VERSION			=11;			// Version identifier for module
 localparam HS_DUMPFORMAT		=1;			// Version identifier for dump format
 localparam HS_HEADERLENGTH		=16;			// Size of header chunk (default=16 bytes)
 
@@ -213,9 +217,9 @@ reg										dump_write = 1'b0;
 wire  [7:0]								hiscore_buffer_out /* synthesis keep */;
 reg										buffer_write = 1'b0;
 reg	[19:0]							compare_length = 1'b0;
-reg										compare_nonzero = 1'b1; // High after extract and compare if any byte returned is non-zero
-reg										compare_changed = 1'b1; // High after extract and compare if any byte is different to current hiscore data
-
+reg										compare_nonzero = 1'b1;	// High after extract and compare if any byte returned is non-zero
+reg										compare_changed = 1'b1;	// High after extract and compare if any byte is different to current hiscore data
+reg										dump_dirty = 1'b0;		// High if dump has changed since last save (or first load if no save has occurred)
 
 wire [23:0]								address_data_in;
 wire [(CFG_LENGTHWIDTH*8)-1:0]	length_data_in;
@@ -366,6 +370,8 @@ begin
 			begin
 				// Set local address to read from hiscore data based on ioctl_address
 				data_addr <= ioctl_addr[HS_SCOREWIDTH-1:0];
+				// Clear dump dirty flag
+				dump_dirty <= 1'b0;
 			end
 
 			// Trigger hiscore extraction when OSD is opened
@@ -384,6 +390,7 @@ begin
 						begin
 							// Setup addresses and comparison flags
 							buffer_addr <= 0;
+							data_addr <= 0;
 							counter <= 0;
 							compare_nonzero <= 1'b0;
 							compare_changed <= 1'b0;
@@ -449,6 +456,7 @@ begin
 							end
 							// Always stop writing to hiscore dump ram and increment local address
 							buffer_addr <= buffer_addr + 1'b1;
+							data_addr <= data_addr + 1'b1;
 							buffer_write <= 1'b0;
 						end
 					SM_COMPARECOMPLETE:
@@ -458,13 +466,21 @@ begin
 							if (compare_changed == 1'b1 && compare_nonzero == 1'b1)
 							begin
 								// If high scores have changed and are not blank, update the hiscore data from extract buffer
+								dump_dirty <= 1'b1;
 								state <= SM_EXTRACTINIT;
 							end
 							else
 							begin
 								// If no change or scores are invalid leave the existing hiscore data in place
-								extracting_dump <= 1'b0;
-								state <= SM_STOPPED;
+								if(dump_dirty == 1'b1 && autosave == 1'b1)
+								begin
+									state <= SM_EXTRACTSAVE;
+								end
+								else
+								begin
+									extracting_dump <= 1'b0;
+									state <= SM_STOPPED;
+								end
 							end
 						end
 					SM_EXTRACTINIT:
@@ -481,14 +497,29 @@ begin
 							if (buffer_addr == compare_length)
 							begin
 								dump_write <= 1'b0;
-								state <= SM_EXTRACTCOMPLETE;
+								state <= SM_EXTRACTSAVE;
 							end
 							// Increment buffer address and set data address to one behind
 							data_addr <= buffer_addr;
 							buffer_addr <= buffer_addr + 1'b1;
 						end
+					SM_EXTRACTSAVE:
+						begin
+							if(autosave == 1'b1)
+							begin
+								ioctl_upload_req <= 1'b1;
+								state <= SM_TIMER;
+								next_state <= SM_EXTRACTCOMPLETE;
+								wait_timer <= 4'd4;
+							end
+							else
+							begin
+								state <= SM_STOPPED;
+							end
+						end
 					SM_EXTRACTCOMPLETE:
 						begin
+							ioctl_upload_req <= 1'b0;
 							extracting_dump <= 1'b0;
 							state <= SM_STOPPED;
 						end
