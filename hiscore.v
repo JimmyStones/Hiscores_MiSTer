@@ -73,13 +73,13 @@ module hiscore
 
 // Parameters read from config header
 reg [31:0]	START_WAIT			=32'd0;		// Delay before beginning check process
-reg [15:0]	CHECK_WAIT 			=16'hFF;	// Delay between start/end check attempts
+reg [15:0]	CHECK_WAIT 			=16'hFF;		// Delay between start/end check attempts
 reg [15:0]	CHECK_HOLD			=16'd2;		// Hold time for start/end check reads
 reg [15:0]	WRITE_HOLD			=16'd2;		// Hold time for game RAM writes 
 reg [15:0]	WRITE_REPEATCOUNT	=16'b1;		// Number of times to write score to game RAM
 reg [15:0]	WRITE_REPEATWAIT	=16'b1111;	// Delay between subsequent write attempts to game RAM
-reg [7:0]	ACCESS_PAUSEPAD		=8'd4;		// Cycles to wait with paused CPU before and after RAM access
-
+reg [7:0]	ACCESS_PAUSEPAD	=8'd4;		// Cycles to wait with paused CPU before and after RAM access
+reg 			CHANGEMASK			=1'b0;		// Load change mask
 
 // State machine constants
 localparam SM_STATEWIDTH	 = 5;				// Width of state machine net
@@ -101,10 +101,11 @@ localparam SM_WRITECOMPLETE = 11;
 localparam SM_WRITERETRY	 = 12;
 
 localparam SM_COMPAREINIT	 = 16;
-localparam SM_COMPAREREADY	 = 17;
-localparam SM_COMPAREREAD	 = 18;
-localparam SM_COMPAREDONE	 = 19;
-localparam SM_COMPARECOMPLETE	 = 20;
+localparam SM_COMPAREBEGIN	 = 17;
+localparam SM_COMPAREREADY	 = 18;
+localparam SM_COMPAREREAD	 = 19;
+localparam SM_COMPAREDONE	 = 20;
+localparam SM_COMPARECOMPLETE	 = 21;
 
 localparam SM_EXTRACTINIT	 = 22;
 localparam SM_EXTRACT		 = 23;
@@ -129,7 +130,7 @@ Hiscore config data structure (version 1)
 2 byte		WRITE_REPEATCOUNT
 2 byte		WRITE_REPEATWAIT
 1 byte		ACCESS_PAUSEPAD
-1 byte		(padding/future use)
+1 byte		CHANGEMASK
 
 - Entry format (when CFG_LENGTHWIDTH=1)
 00 00 43 0b  0f    10  01  00
@@ -164,6 +165,7 @@ localparam HS_HEADERLENGTH		=16;			// Size of header chunk (default=16 bytes)
 wire				downloading_config;				// Is hiscore configuration currently being loaded from HPS?
 reg				downloaded_config = 1'b0;			// Has hiscore configuration been loaded successfully
 wire				parsing_header;					// Is hiscore configuration header currently being parsed?
+wire				parsing_mask;					// Is hiscore configuration change mask currently being parsed? (optional 2nd line of config)
 
 // Hiscore data tracking
 wire				downloading_dump;				// Is hiscore data currently being loaded from HPS?
@@ -179,7 +181,8 @@ reg				writing_scores = 1'b0;				// Is state machine currently restoring hiscore
 reg	[3:0]		initialised;						// Number of times state machine has been initialised (debug only)
 
 assign downloading_config = ioctl_download && (ioctl_index==HS_CONFIGINDEX);
-assign parsing_header = downloading_config && (ioctl_addr<=HS_HEADERLENGTH);
+assign parsing_header = downloading_config && (ioctl_addr<HS_HEADERLENGTH);
+assign parsing_mask = downloading_config && !parsing_header && CHANGEMASK == 1'b1 && (ioctl_addr<=HS_HEADERLENGTH + 4'd8);
 assign downloading_dump = ioctl_download && (ioctl_index==HS_DUMPINDEX);
 assign uploading_dump = ioctl_upload && (ioctl_index==HS_DUMPINDEX);
 assign ram_intent_read = reading_scores | checking_scores;
@@ -195,6 +198,8 @@ reg	[CFG_ADDRESSWIDTH-1:0]		total_entries = 1'b0;	// Total count of config table
 reg										reset_last = 1'b0;		// Last cycle reset
 reg	[7:0]								write_counter = 1'b0;	// Index of current game RAM write attempt
 
+reg	[255:0]							change_mask;				// Bit mask for dump change check
+
 reg	[7:0]								last_ioctl_index;			// Last cycle HPS IO index
 reg										last_ioctl_download = 0;// Last cycle HPS IO download
 reg	[7:0]								last_data_from_hps;		// Last cycle HPS IO data out
@@ -204,13 +209,13 @@ reg										last_OSD_STATUS;			// Last cycle OSD status
 
 reg	[24:0]							ram_addr;					// Target RAM address for hiscore read/write
 reg	[24:0]							base_io_addr;
-wire	[23:0]							addr_base;
+wire	[23:0]							addr_base /* synthesis keep */;
 wire	[(CFG_LENGTHWIDTH*8)-1:0]	length;
 wire	[24:0]							end_addr = (addr_base + length - 1'b1);
 reg	[HS_SCOREWIDTH-1:0]			data_addr;
 reg	[HS_SCOREWIDTH-1:0]			buffer_addr;
-wire	[7:0]								start_val;
-wire	[7:0]								end_val;
+wire	[7:0]								start_val /* synthesis keep */;
+wire	[7:0]								end_val /* synthesis keep */;
 
 wire  [7:0]								hiscore_data_out /* synthesis keep */;
 reg										dump_write = 1'b0;
@@ -219,6 +224,7 @@ reg										buffer_write = 1'b0;
 reg	[19:0]							compare_length = 1'b0;
 reg										compare_nonzero = 1'b1;	// High after extract and compare if any byte returned is non-zero
 reg										compare_changed = 1'b1;	// High after extract and compare if any byte is different to current hiscore data
+wire										check_mask = change_mask[compare_length]/* synthesis keep */;
 reg										dump_dirty = 1'b0;		// High if dump has changed since last save (or first load if no save has occurred)
 
 wire [23:0]								address_data_in;
@@ -227,17 +233,21 @@ wire [(CFG_LENGTHWIDTH*8)-1:0]	length_data_in;
 assign address_data_in = {last_data_from_hps2, last_data_from_hps, data_from_hps};
 assign length_data_in = (CFG_LENGTHWIDTH == 1'b1) ? data_from_hps : {last_data_from_hps, data_from_hps};
 
-wire address_we = downloading_config & ~parsing_header & (ioctl_addr[2:0] == 3'd3);
-wire length_we = downloading_config & ~parsing_header & (ioctl_addr[2:0] == 3'd3 + CFG_LENGTHWIDTH);
-wire startdata_we = downloading_config & ~parsing_header & (ioctl_addr[2:0] == 3'd4 + CFG_LENGTHWIDTH); 
-wire enddata_we = downloading_config & ~parsing_header & (ioctl_addr[2:0] == 3'd5 + CFG_LENGTHWIDTH);
+wire parsing_config = ~(parsing_header | parsing_mask); // Hiscore config lines are being parsed
+
+wire [CFG_ADDRESSWIDTH-1:0] config_upload_addr = ioctl_addr[CFG_ADDRESSWIDTH+2:3] - (CHANGEMASK ? 3'd3 : 3'd2) /* synthesis keep */;
+
+wire address_we = downloading_config & parsing_config & (ioctl_addr[2:0] == 3'd3);
+wire length_we = downloading_config & parsing_config & (ioctl_addr[2:0] == 3'd3 + CFG_LENGTHWIDTH);
+wire startdata_we = downloading_config & parsing_config & (ioctl_addr[2:0] == 3'd4 + CFG_LENGTHWIDTH); 
+wire enddata_we = downloading_config & parsing_config & (ioctl_addr[2:0] == 3'd5 + CFG_LENGTHWIDTH);
 
 // RAM chunks used to store configuration data
 // - Address table
 dpram_hs #(.aWidth(CFG_ADDRESSWIDTH),.dWidth(24))
 address_table(
 	.clk(clk),
-	.addr_a(ioctl_addr[CFG_ADDRESSWIDTH+2:3] - 2'd2),
+	.addr_a(config_upload_addr),
 	.we_a(address_we & ioctl_wr),
 	.d_a(address_data_in),
 	.addr_b(counter),
@@ -247,7 +257,7 @@ address_table(
 dpram_hs #(.aWidth(CFG_ADDRESSWIDTH),.dWidth(CFG_LENGTHWIDTH*8))
 length_table(
 	.clk(clk),
-	.addr_a(ioctl_addr[CFG_ADDRESSWIDTH+2:3] - 2'd2),
+	.addr_a(config_upload_addr),
 	.we_a(length_we & ioctl_wr),
 	.d_a(length_data_in),
 	.addr_b(counter),
@@ -257,7 +267,7 @@ length_table(
 dpram_hs #(.aWidth(CFG_ADDRESSWIDTH),.dWidth(8))
 startdata_table(
 	.clk(clk),
-	.addr_a(ioctl_addr[CFG_ADDRESSWIDTH+2:3] - 2'd2),
+	.addr_a(config_upload_addr),
 	.we_a(startdata_we & ioctl_wr), 
 	.d_a(data_from_hps),
 	.addr_b(counter),
@@ -267,7 +277,7 @@ startdata_table(
 dpram_hs #(.aWidth(CFG_ADDRESSWIDTH),.dWidth(8))
 enddata_table(
 	.clk(clk),
-	.addr_a(ioctl_addr[CFG_ADDRESSWIDTH+2:3] - 2'd2),
+	.addr_a(config_upload_addr),
 	.we_a(enddata_we & ioctl_wr),
 	.d_a(data_from_hps),
 	.addr_b(counter),
@@ -300,6 +310,8 @@ assign data_to_ram = hiscore_data_out;
 assign data_to_hps = hiscore_data_out;
 
 wire [3:0] header_chunk = ioctl_addr[3:0];
+wire [7:0] mask_chunk = ioctl_addr[7:0] - 5'd16;
+wire [255:0] mask_load_index = mask_chunk * 8;
 
 always @(posedge clk)
 begin
@@ -318,12 +330,18 @@ begin
 				if(header_chunk == 4'd11) WRITE_REPEATCOUNT <= { last_data_from_hps, data_from_hps };
 				if(header_chunk == 4'd13) WRITE_REPEATWAIT <= { last_data_from_hps, data_from_hps };
 				if(header_chunk == 4'd14) ACCESS_PAUSEPAD <= data_from_hps;
+				if(header_chunk == 4'd15) CHANGEMASK <= data_from_hps[0];
 			end
+		end
+		else
+		if(parsing_mask)
+		begin
+			change_mask[mask_load_index +: 8] <= data_from_hps;
 		end
 		else
 		begin
 			// Keep track of the largest entry during config download
-			total_entries <= ioctl_addr[CFG_ADDRESSWIDTH+2:3] - 2'd2;
+			total_entries <= config_upload_addr;
 		end
 	end
 
@@ -398,14 +416,19 @@ begin
 							// Pause cpu and wait for next state
 							pause_cpu <= 1'b1;
 							state <= SM_TIMER;
-							next_state <= SM_COMPAREREADY;
+							next_state <= SM_COMPAREBEGIN;
 							wait_timer <= ACCESS_PAUSEPAD;
+						end
+					SM_COMPAREBEGIN:
+						begin
+							// Get ready to read next line (wait until addr_base is updated)
+							reading_scores <= 1'b1;
+							state <= SM_COMPAREREADY;
 						end
 					SM_COMPAREREADY:
 						begin
 							// Set ram address and wait for it to return correctly
 							ram_addr <= addr_base;
-							reading_scores <= 1'b1;
 							if(ram_addr == addr_base)
 							begin
 								state <= SM_COMPAREREAD;
@@ -419,7 +442,8 @@ begin
 						end
 					SM_COMPAREDONE:
 						begin
-							if (data_from_ram != hiscore_data_out)
+							// If RAM data has changed since last dump and there is either no mask or a 1 in the mask for this address
+							if (data_from_ram != hiscore_data_out && (CHANGEMASK==8'b0 || check_mask==1))
 							begin
 								// Hiscore data changed
 								compare_changed <= 1'b1;
@@ -445,7 +469,7 @@ begin
 								begin
 									// Next config line
 									counter <= counter + 1'b1;
-									state <= SM_COMPAREREADY;
+									state <= SM_COMPAREBEGIN;
 								end
 							end
 							else
@@ -565,7 +589,7 @@ begin
 					SM_CHECKSTARTVAL: // Start check
 						begin
 							// Check for matching start value
-							if(wait_timer != CHECK_HOLD & data_from_ram == start_val)
+							if(wait_timer != CHECK_HOLD && data_from_ram == start_val)
 							begin
 								// Prepare end check
 								ram_addr <= end_addr;
