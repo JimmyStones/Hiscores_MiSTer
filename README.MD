@@ -31,16 +31,18 @@ Further development by Jim Gregory ([JimmyStones](https://github.com/jimmystones
 #### 0006 - 2021-03-27
 - Move 'tweakable' parameters into MRA data header
 #### 0007 - 2021-04-17
- - Convert state machine to use constants
- - Add new 'pause padding' states
+- Convert state machine to use constants
+- Add new 'pause padding' states
 #### 0008 - 2021-05-12
- - Feed back core-level pause to halt startup timer
+- Feed back core-level pause to halt startup timer
 #### 0009 - 2021-07-31
- - Split hiscore extraction from upload (updates hiscore buffer on OSD open)
+- Split hiscore extraction from upload (updates hiscore buffer on OSD open)
 #### 0010 - 2021-08-03
- - Add hiscore extraction buffer and change detection (ready for autosave!)
+- Add hiscore extraction buffer and change detection (ready for autosave!)
 #### 0011 - 2021-08-07
-Optional auto-save on OSD open
+- Optional auto-save on OSD open
+#### 0012 - 2021-08-17
+- Add variable length change detection mask
 
 ## Implementation instructions
 
@@ -167,7 +169,7 @@ The ```<rom index="3">``` section contains a header section with runtime tweakab
 2 | WRITE_REPEATCOUNT | Number of times to write score to game RAM - used to brute force cores that don't behave (usually 1)
 2 | WRITE_REPEATWAIT | Number of cycles delay between subsequent write attempts
 1 | ACCESS_PAUSEPAD | Number of cycles to pause CPU before and after RAM access attempts (usually 0)
-1 | (padding/future use) |
+1 | CHANGEMASK | Number of bytes to read after header into change detection mask
 
 ##### Entry data
 
@@ -203,6 +205,17 @@ If CFG_LENGTHWIDTH=2 then the following structure is used:
 The size attribute in ```<nvram index="4" size="?">``` should be the **decimal** total of all lengths in the entry table.
 
 ### Notes
+
+_Change detection_
+
+Change detection is employed to limit unnecessary autosave events. An optional change detection mask can be provided to stop autosave being triggered by constantly changing data in the hiscore RAM areas.  The final byte of the header specifies the amount of bytes to read into the mask.  Only multiples of 8 are supported.
+
+##### Example:
+
+CHANGEMASK = 8 with the following 8 bytes:
+F0 FF FF FF FF FF FF FF
+
+This would result in a mask with the first 4 bits as zero - this would mean any change in the first 4 bytes of the hiscore data dump are ignored.
 
 _Multiplexing_
 

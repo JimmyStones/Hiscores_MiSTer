@@ -34,6 +34,7 @@
  0009 - 2021-07-31 -	Split hiscore extraction from upload (updates hiscore buffer on OSD open)
  0010 - 2021-08-03 -	Add hiscore buffer and change detection (ready for autosave!)
  0011 - 2021-08-07 -	Optional auto-save on OSD open
+ 0012 - 2021-08-17 -	Add variable length change detection mask
 ============================================================================
 */
 
@@ -79,7 +80,7 @@ reg [15:0]	WRITE_HOLD			=16'd2;		// Hold time for game RAM writes
 reg [15:0]	WRITE_REPEATCOUNT	=16'b1;		// Number of times to write score to game RAM
 reg [15:0]	WRITE_REPEATWAIT	=16'b1111;	// Delay between subsequent write attempts to game RAM
 reg [7:0]	ACCESS_PAUSEPAD	=8'd4;		// Cycles to wait with paused CPU before and after RAM access
-reg 			CHANGEMASK			=1'b0;		// Load change mask
+reg [7:0]	CHANGEMASK			=1'b0;		// Length of change mask
 
 // State machine constants
 localparam SM_STATEWIDTH	 = 5;				// Width of state machine net
@@ -182,7 +183,7 @@ reg	[3:0]		initialised;						// Number of times state machine has been initialis
 
 assign downloading_config = ioctl_download && (ioctl_index==HS_CONFIGINDEX);
 assign parsing_header = downloading_config && (ioctl_addr<HS_HEADERLENGTH);
-assign parsing_mask = downloading_config && !parsing_header && CHANGEMASK == 1'b1 && (ioctl_addr<=HS_HEADERLENGTH + 4'd8);
+assign parsing_mask = downloading_config && !parsing_header && (CHANGEMASK > 8'b0) && (ioctl_addr < HS_HEADERLENGTH + CHANGEMASK);
 assign downloading_dump = ioctl_download && (ioctl_index==HS_DUMPINDEX);
 assign uploading_dump = ioctl_upload && (ioctl_index==HS_DUMPINDEX);
 assign ram_intent_read = reading_scores | checking_scores;
@@ -235,7 +236,7 @@ assign length_data_in = (CFG_LENGTHWIDTH == 1'b1) ? data_from_hps : {last_data_f
 
 wire parsing_config = ~(parsing_header | parsing_mask); // Hiscore config lines are being parsed
 
-wire [CFG_ADDRESSWIDTH-1:0] config_upload_addr = ioctl_addr[CFG_ADDRESSWIDTH+2:3] - (CHANGEMASK ? 3'd3 : 3'd2) /* synthesis keep */;
+wire [CFG_ADDRESSWIDTH-1:0] config_upload_addr = ioctl_addr[CFG_ADDRESSWIDTH+2:3] - (9'd2 + CHANGEMASK[7:3]) /* synthesis keep */;
 
 wire address_we = downloading_config & parsing_config & (ioctl_addr[2:0] == 3'd3);
 wire length_we = downloading_config & parsing_config & (ioctl_addr[2:0] == 3'd3 + CFG_LENGTHWIDTH);
@@ -330,13 +331,13 @@ begin
 				if(header_chunk == 4'd11) WRITE_REPEATCOUNT <= { last_data_from_hps, data_from_hps };
 				if(header_chunk == 4'd13) WRITE_REPEATWAIT <= { last_data_from_hps, data_from_hps };
 				if(header_chunk == 4'd14) ACCESS_PAUSEPAD <= data_from_hps;
-				if(header_chunk == 4'd15) CHANGEMASK <= data_from_hps[0];
+				if(header_chunk == 4'd15) CHANGEMASK <= data_from_hps;
 			end
 		end
 		else
 		if(parsing_mask)
 		begin
-			change_mask[mask_load_index +: 8] <= data_from_hps;
+			if(ioctl_wr == 1'b1) change_mask[mask_load_index +: 8] <= data_from_hps;
 		end
 		else
 		begin
