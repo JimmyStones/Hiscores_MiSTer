@@ -43,6 +43,8 @@ Further development by Jim Gregory ([JimmyStones](https://github.com/jimmystones
 - Optional auto-save on OSD open
 #### 0012 - 2021-08-17
 - Add variable length change detection mask
+#### 0013 - 2021-09-01
+- Output configured signal for autosave option menu masking
 
 ## Implementation instructions
 
@@ -60,6 +62,7 @@ wire hs_write_enable;
 wire hs_access_read;
 wire hs_access_write;
 wire hs_pause;
+wire hs_configured;
 
 hiscore #(
 	.HS_ADDRESSWIDTH(16),
@@ -78,7 +81,8 @@ hiscore #(
 	.ram_write(hs_write_enable),
 	.ram_intent_read(hs_access_read),
 	.ram_intent_write(hs_access_write),
-	.pause_cpu(hs_pause)
+	.pause_cpu(hs_pause),
+	.configured(hs_configured)
 );
 ```
  The module parameters in the example above are the bare minimum config required to customise behaviour for a core.  See [Module parameters](#Module-parameters) for further details.
@@ -132,6 +136,7 @@ Parameters should be configured to allow the high score system to cope with all 
 | ram_intent_read  | out       | Active-high signal used to enable RAM read access
 | ram_intent_write | out       | Active-high signal used to enable RAM write access
 | pause_cpu        | out       | Active-high signal used to pause CPU
+| configured       | out       | Active-high signal used to mask autosave menu item if game has no hiscore configuration
 
 ### MRA data
 

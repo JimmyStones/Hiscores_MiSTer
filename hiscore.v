@@ -35,6 +35,7 @@
  0010 - 2021-08-03 -	Add hiscore buffer and change detection (ready for autosave!)
  0011 - 2021-08-07 -	Optional auto-save on OSD open
  0012 - 2021-08-17 -	Add variable length change detection mask
+ 0013 - 2021-09-01 -	Output configured signal for autosave option menu masking
 ============================================================================
 */
 
@@ -69,7 +70,8 @@ module hiscore
 	output	reg							ram_write,			// Write to game RAM (active high)
 	output									ram_intent_read,	// RAM read required (active high)
 	output									ram_intent_write,	// RAM write required (active high)
-	output	reg							pause_cpu			// Pause core CPU to prepare for/relax after RAM access
+	output	reg							pause_cpu,			// Pause core CPU to prepare for/relax after RAM access
+	output									configured			// Hiscore module has valid configuration (active high)
 );
 
 // Parameters read from config header
@@ -156,7 +158,7 @@ Hiscore config data structure (version 1)
 
 */
 
-localparam HS_VERSION			=11;			// Version identifier for module
+localparam HS_VERSION			=13;			// Version identifier for module
 localparam HS_DUMPFORMAT		=1;			// Version identifier for dump format
 localparam HS_HEADERLENGTH		=16;			// Size of header chunk (default=16 bytes)
 
@@ -181,6 +183,7 @@ reg				writing_scores = 1'b0;				// Is state machine currently restoring hiscore
 
 reg	[3:0]		initialised;						// Number of times state machine has been initialised (debug only)
 
+assign configured = downloaded_config;
 assign downloading_config = ioctl_download && (ioctl_index==HS_CONFIGINDEX);
 assign parsing_header = downloading_config && (ioctl_addr<HS_HEADERLENGTH);
 assign parsing_mask = downloading_config && !parsing_header && (CHANGEMASK > 8'b0) && (ioctl_addr < HS_HEADERLENGTH + CHANGEMASK);
