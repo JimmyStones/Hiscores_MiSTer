@@ -72,7 +72,7 @@ hiscore #(
 	.clk(clk_sys),
 	.paused(pause_cpu),
 	.reset(reset),
-	.autosave(~status[28]),
+	.autosave(status[28]),
 	.ram_address(hs_address),
 	.data_from_ram(hs_data_out),
 	.data_to_ram(hs_data_in),
