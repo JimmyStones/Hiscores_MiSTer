@@ -36,6 +36,7 @@
  0011 - 2021-08-07 -	Optional auto-save on OSD open
  0012 - 2021-08-17 -	Add variable length change detection mask
  0013 - 2021-09-01 -	Output configured signal for autosave option menu masking
+ 0014 - 2021-09-09 -	Fix turning on autosave w/o core reload 
 ============================================================================
 */
 
@@ -158,7 +159,7 @@ Hiscore config data structure (version 1)
 
 */
 
-localparam HS_VERSION			=13;			// Version identifier for module
+localparam HS_VERSION			=14;			// Version identifier for module
 localparam HS_DUMPFORMAT		=1;			// Version identifier for dump format
 localparam HS_HEADERLENGTH		=16;			// Size of header chunk (default=16 bytes)
 
@@ -542,6 +543,7 @@ begin
 							end
 							else
 							begin
+								extracting_dump <= 1'b0;
 								state <= SM_STOPPED;
 							end
 						end

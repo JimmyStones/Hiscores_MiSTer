@@ -6,6 +6,8 @@ Created by Alan Steremberg ([alanswx](https://github.com/alanswx))
 
 Further development by Jim Gregory ([JimmyStones](https://github.com/jimmystones))
 
+Bug fixes by ([tacertain](https://github.com/tacertain))
+
 ### Features
 - Reads hiscore.dat entries from MRA (defaults to ioctl index = 3)
 - Loads and saves high score data in \<MRA name\>.nvm dump (defaults to ioctl index = 4)
@@ -45,6 +47,8 @@ Further development by Jim Gregory ([JimmyStones](https://github.com/jimmystones
 - Add variable length change detection mask
 #### 0013 - 2021-09-01
 - Output configured signal for autosave option menu masking
+#### 0013 - 2021-09-09
+- Fix turning on autosave w/o core reload (tacertain)
 
 ## Implementation instructions
 
