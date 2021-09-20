@@ -6,7 +6,7 @@ Created by Alan Steremberg ([alanswx](https://github.com/alanswx))
 
 Further development by Jim Gregory ([JimmyStones](https://github.com/jimmystones))
 
-Bug fixes by ([tacertain](https://github.com/tacertain))
+Bug fixes by Andrew Certain ([tacertain](https://github.com/tacertain))
 
 ### Features
 - Reads hiscore.dat entries from MRA (defaults to ioctl index = 3)
@@ -47,7 +47,7 @@ Bug fixes by ([tacertain](https://github.com/tacertain))
 - Add variable length change detection mask
 #### 0013 - 2021-09-01
 - Output configured signal for autosave option menu masking
-#### 0013 - 2021-09-09
+#### 0014 - 2021-09-09
 - Fix turning on autosave w/o core reload (tacertain)
 
 ## Implementation instructions
