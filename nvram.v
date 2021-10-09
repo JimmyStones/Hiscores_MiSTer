@@ -100,15 +100,15 @@ reg	[DUMPWIDTH-1:0]				compare_length = 1'b0;
 reg										compare_nonzero = 1'b1;	// High after extract and compare if any byte returned is non-zero
 reg										compare_changed = 1'b1;	// High after extract and compare if any byte is different to current hiscore data
 wire [7:0] 								check_mask_out /* synthesis keep */;
-wire 										check_mask = check_mask_out[2:0] /* synthesis keep */;
+wire 										check_mask = check_mask_out[buffer_addr[2:0]] /* synthesis keep */;
 
 // RAM used to store high score check mask
-spram_hs #(.aWidth(DUMPWIDTH-3),.dWidth(1))
+spram_hs #(.aWidth(DUMPWIDTH-3),.dWidth(8))
 mask_ram (
 	.clk(clk),
-	.addr(downloading_config ? ioctl_addr[DUMPWIDTH-1:3] : buffer_addr[DUMPWIDTH-1:3]),
+	.addr(downloading_config ? ioctl_addr[DUMPWIDTH-4:0] : buffer_addr[DUMPWIDTH-1:3]),
 	.we(downloading_config && ioctl_wr),
-	.d(ioctl_dout[ioctl_addr[2:0]]),
+	.d(ioctl_dout),
 	.q(check_mask_out)
 );
 
