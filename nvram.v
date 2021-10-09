@@ -22,12 +22,14 @@
 /*
  Version history:
  0001 - 2021-10-01 -	First marked release
+ 0002 - 2021-10-09 -	Add change mask support
  ===========================================================================
 */
 
 module nvram
 #(
 	parameter DUMPWIDTH=8,								// Address size of NVRAM for highscore data (default 8 = 256 bytes max)
+	parameter CONFIGINDEX=3,								// ioctl_index for config transfer
 	parameter DUMPINDEX=4,								// ioctl_index for dump transfer
 	parameter PAUSEPAD=4								// Cycles to wait with paused CPU before and after NVRAM access
 )
@@ -54,10 +56,14 @@ module nvram
 );
 
 // Hiscore data tracking
-wire				downloading_dump;				// Is hiscore data currently being loaded from HPS?
-wire				uploading_dump;					// Is hiscore data currently being sent to HPS?
-reg				extracting_dump = 1'b0;				// Is hiscore data currently extracted and checked for change?
+wire				downloading_config;				// Is hiscore config currently being loaded?
+reg				downloaded_config = 1'b0;		// Has hiscore config been loaded?
+wire				downloading_dump;					// Is hiscore data currently being loaded?
+reg				downloaded_dump = 1'b0;			// Has hiscore data been loaded?
+wire				uploading_dump;					// Is hiscore data currently being saved?
+reg				extracting_dump = 1'b0;			// Is hiscore data currently extracted and checked for change?
 
+assign downloading_config = ioctl_download && (ioctl_index==CONFIGINDEX);
 assign downloading_dump = ioctl_download && (ioctl_index==DUMPINDEX);
 assign uploading_dump = ioctl_upload && (ioctl_index==DUMPINDEX);
 
@@ -79,19 +85,32 @@ reg	[31:0]							wait_timer;								// Wait timer for inital/read/write delays
 // Last cycle signals
 reg										last_reset = 1'b0;		// Last cycle reset
 reg										last_OSD_STATUS;			// Last cycle OSD status
+reg	[7:0]								last_ioctl_index;			// Last cycle HPS IO index
+reg										last_ioctl_download = 0;// Last cycle HPS IO download
 
 // Buffer RAM control signals
 reg	[DUMPWIDTH-1:0]				buffer_addr;
 reg	[DUMPWIDTH-1:0]				buffer_length;
 wire  [7:0]								buffer_data_in;
 reg										buffer_write = 1'b0;
-
 assign nvram_address = buffer_addr;
 
 // Change detection signals
 reg	[DUMPWIDTH-1:0]				compare_length = 1'b0;
 reg										compare_nonzero = 1'b1;	// High after extract and compare if any byte returned is non-zero
 reg										compare_changed = 1'b1;	// High after extract and compare if any byte is different to current hiscore data
+wire [7:0] 								check_mask_out /* synthesis keep */;
+wire 										check_mask = check_mask_out[2:0] /* synthesis keep */;
+
+// RAM used to store high score check mask
+spram_hs #(.aWidth(DUMPWIDTH-3),.dWidth(1))
+mask_ram (
+	.clk(clk),
+	.addr(downloading_config ? ioctl_addr[DUMPWIDTH-1:3] : buffer_addr[DUMPWIDTH-1:3]),
+	.we(downloading_config && ioctl_wr),
+	.d(ioctl_dout[ioctl_addr[2:0]]),
+	.q(check_mask_out)
+);
 
 // RAM used to store high score data buffer
 spram_hs #(.aWidth(DUMPWIDTH),.dWidth(8))
@@ -103,11 +122,19 @@ nvram_buffer (
 	.q(ioctl_din)
 );
 
-
 always @(posedge clk)
 begin
 
+	// Track completion of configuration and dump download
+	if ((last_ioctl_download != ioctl_download) && (ioctl_download == 1'b0))
+	begin
+		if (last_ioctl_index==CONFIGINDEX) downloaded_config <= 1'b1;
+		if (last_ioctl_index==DUMPINDEX) downloaded_dump <= 1'b1;
+	end
+
 	// Track last cycle values
+	last_ioctl_download <= ioctl_download;
+	last_ioctl_index <= ioctl_index;
 	last_OSD_STATUS <= OSD_STATUS;
 	last_reset <= reset;
 
@@ -157,7 +184,7 @@ begin
 					end
 				SM_EXTRACTNEXT:
 					begin
-						if (nvram_data_out != ioctl_din) 
+						if ((nvram_data_out != ioctl_din) && (downloaded_config == 1'b0 || check_mask == 1'b1))  
 						begin
 							compare_changed <= 1'b1; // Hiscore data changed since last dump
 						end
@@ -181,7 +208,9 @@ begin
 						else
 						begin
 							// Otherwise move to next byte
-							state <= SM_EXTRACTREADY; 
+							state <= SM_TIMER;
+							next_state <= SM_EXTRACTREADY;
+							wait_timer <= 1'b0;
 						end
 
 					end
@@ -242,14 +271,8 @@ module spram_hs #(
 reg [dWidth-1:0] ram [2**aWidth-1:0];
 
 always @(posedge clk) begin
-	if (we) begin 
-		ram[addr] <= d;
-		q <= d;
-	end
-	else
-	begin
-		q <= ram[addr];
-	end
+	if (we) ram[addr] <= d;
+	q <= ram[addr];
 end
 
 endmodule

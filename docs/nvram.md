@@ -11,10 +11,13 @@ Created by Jim Gregory ([JimmyStones](https://github.com/jimmystones))
 - Configurable pause padding around game NVRAM access
 - Pause signal to halt CPU for during multiplex with cores already using dual-port RAM
 - Scores are extracted every time OSD is opened into temporary buffer, if changed then they are copied to saveable data and auto-save is triggered (optional)
+- Optional change mask can be supplied to ignore NVRAM areas to avoid unnecessary autosave events
 
 ### History
 #### 0001 - 2021-10-05
 - First marked release
+#### 0002 - 2021-10-09
+- Add change mask support
 
 ## Implementation instructions
 
@@ -30,6 +33,7 @@ wire hs_pause;
 
 nvram #(
 	.DUMPWIDTH(8),
+	.CONFIGINDEX(3),
 	.DUMPINDEX(4),
 	.PAUSEPAD(2)
 ) hi (
@@ -84,11 +88,19 @@ Parameters should be configured to allow the high score system to cope with all 
 
 ### MRA data
 
-To enable the high score module add the following section to the MRA.
+To enable the high score module, add the ```<nvram>``` section to the MRA with an index matching that specified in the DUMPINDEX parameter
 
-#### MRA section
 ```xml
 <nvram index="4" size="256"/>
+```
+
+To enable change mask support, add a ```rom``` section with an index matching that specified in the CONFIGINDEX parameter.  The hex content should represent the bitmap of the check mask required.
+```xml
+<rom index="3">
+	<part>
+		FF FF FF FF FF FF FF FF FF FF FF ...
+	</part>
+</rom>
 ```
 
 ## License
